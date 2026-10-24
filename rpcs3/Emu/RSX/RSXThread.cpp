@@ -270,11 +270,11 @@ namespace rsx
 
 		// FIFO states and timed scopes overlap. Only the exclusive scope times
 		// partition these measured waits; the remainder is not "useful work".
-		perf_log.notice("RSX_DIAG {\"wall_us\":%llu,\"flips\":%llu,\"unassigned_us\":%llu,"
+		std::string text = fmt::format("RSX_DIAG {\"wall_us\":%llu,\"flips\":%llu,\"unassigned_us\":%llu,"
 			"\"fifo_us\":[%llu,%llu,%llu,%llu,%llu,%llu],\"fifo_transitions\":[%llu,%llu,%llu,%llu,%llu,%llu],"
 			"\"wake_requested_us\":%llu,\"wake_div2_calls\":%llu,"
 			"\"wake\":[%llu,%llu,%llu],\"offloader\":[%llu,%llu,%llu],\"semaphore\":[%llu,%llu,%llu],"
-			"\"submit\":[%llu,%llu,%llu],\"fence\":[%llu,%llu,%llu]}",
+			"\"submit\":[%llu,%llu,%llu],\"fence\":[%llu,%llu,%llu]",
 			sample.elapsed_ns / 1000, sample.flips, unassigned_ns / 1000,
 			sample.fifo_ns[0] / 1000, sample.fifo_ns[1] / 1000, sample.fifo_ns[2] / 1000,
 			sample.fifo_ns[3] / 1000, sample.fifo_ns[4] / 1000, sample.fifo_ns[5] / 1000,
@@ -286,6 +286,20 @@ namespace rsx
 			semaphore.calls, semaphore.inclusive_ns / 1000, semaphore.exclusive_ns / 1000,
 			submit.calls, submit.inclusive_ns / 1000, submit.exclusive_ns / 1000,
 			fence.calls, fence.inclusive_ns / 1000, fence.exclusive_ns / 1000);
+
+		// Per-address NV406E acquires: [address, acquires, waits, wait_us, max_wait_us].
+		text += ",\"sem_order\":[\"address\",\"acquires\",\"waits\",\"wait_us\",\"max_wait_us\"],\"sem\":[";
+		bool first = true;
+		for (const auto& s : sample.semaphores)
+		{
+			if (!s.acquires) break;
+			if (!first) text += ',';
+			first = false;
+			fmt::append(text, "[%u,%llu,%llu,%llu,%llu]", s.address, s.acquires, s.waits, s.wait_ns / 1000, s.max_wait_ns / 1000);
+		}
+		const auto& o = sample.semaphore_overflow;
+		fmt::append(text, "],\"sem_overflow\":[%llu,%llu,%llu,%llu]}", o.acquires, o.waits, o.wait_ns / 1000, o.max_wait_ns / 1000);
+		perf_log.notice("%s", text);
 	}
 
 	std::function<bool(u32 addr, bool is_writing)> g_access_violation_handler;

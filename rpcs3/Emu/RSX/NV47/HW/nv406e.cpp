@@ -39,8 +39,15 @@ namespace rsx
 			RSX(ctx)->last_sema_cmd = RSX(ctx)->fifo_ctrl->get_pos() - 4;
 			RSX(ctx)->last_sema_addr = addr;
 
+			const bool diagnostic_active = diagnostics::enabled() && RSX(ctx)->is_current_thread();
+
 			if (sema == arg)
 			{
+				if (diagnostic_active)
+				{
+					diagnostics::semaphore_acquired(addr, false, 0);
+				}
+
 				// Flip semaphore doesnt need wake-up delay
 				if (addr != RSX(ctx)->label_addr + 0x10)
 				{
@@ -59,8 +66,8 @@ namespace rsx
 			u64 last_check_val = start;
 
 			{
-				diagnostics::scope diagnostic_wait(diagnostics::bucket::semaphore_wait,
-					diagnostics::enabled() && RSX(ctx)->is_current_thread());
+				diagnostics::scope diagnostic_wait(diagnostics::bucket::semaphore_wait, diagnostic_active);
+				diagnostics::semaphore_wait diagnostic_address_wait(addr, diagnostic_active);
 
 				while (sema != arg)
 				{

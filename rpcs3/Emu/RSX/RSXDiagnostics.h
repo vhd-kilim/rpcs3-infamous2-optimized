@@ -34,6 +34,18 @@ namespace rsx::diagnostics
 		std::uint64_t exclusive_ns = 0;
 	};
 
+	// Distinct NV406E semaphore addresses tracked per window; the rest go to overflow.
+	inline constexpr std::size_t semaphore_slot_count = 12;
+
+	struct semaphore_sample
+	{
+		std::uint32_t address = 0;
+		std::uint64_t acquires = 0;
+		std::uint64_t waits = 0;
+		std::uint64_t wait_ns = 0;
+		std::uint64_t max_wait_ns = 0;
+	};
+
 	struct snapshot
 	{
 		std::uint64_t elapsed_ns = 0;
@@ -44,6 +56,8 @@ namespace rsx::diagnostics
 		std::array<std::uint64_t, fifo_state_count> fifo_ns{};
 		std::array<std::uint64_t, fifo_state_count> fifo_transitions{};
 		unsigned current_fifo_state = unknown_fifo_state;
+		std::array<semaphore_sample, semaphore_slot_count> semaphores{};
+		semaphore_sample semaphore_overflow{};
 	};
 
 	inline bool enabled() noexcept
@@ -203,6 +217,39 @@ namespace rsx::diagnostics
 			}
 		}
 
+		// One NV406E acquire. wait_ns is zero when the semaphore already matched.
+		void semaphore_acquired(std::uint32_t address, bool waited, std::uint64_t wait_ns) noexcept
+		{
+			if (!m_enabled)
+			{
+				return;
+			}
+
+			semaphore_sample* sample = &m_window.semaphore_overflow;
+			for (auto& slot : m_window.semaphores)
+			{
+				if (slot.acquires && slot.address != address)
+				{
+					continue;
+				}
+
+				slot.address = address;
+				sample = &slot;
+				break;
+			}
+
+			++sample->acquires;
+			if (waited)
+			{
+				++sample->waits;
+				sample->wait_ns += wait_ns;
+				if (wait_ns > sample->max_wait_ns)
+				{
+					sample->max_wait_ns = wait_ns;
+				}
+			}
+		}
+
 		// Call once per guest flip or another coarse event, not per RSX command.
 		// A live scope defers publication intact until a subsequent tick/flush.
 		template <typename Consumer>
@@ -332,6 +379,45 @@ namespace rsx::diagnostics
 			local().requested_wake_delay(actual_us, divisor);
 		}
 	}
+
+	inline void semaphore_acquired(std::uint32_t address, bool waited, std::uint64_t wait_ns) noexcept
+	{
+		if (enabled())
+		{
+			local().semaphore_acquired(address, waited, wait_ns);
+		}
+	}
+
+	// Wall time of one semaphore wait, attributed to its address when the scope closes.
+	class semaphore_wait final
+	{
+	public:
+		semaphore_wait(std::uint32_t address, bool active) noexcept
+			: m_address(address), m_active(active && enabled())
+		{
+			if (m_active)
+			{
+				m_started = std::chrono::steady_clock::now();
+			}
+		}
+
+		~semaphore_wait() noexcept
+		{
+			if (m_active)
+			{
+				const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - m_started).count();
+				local().semaphore_acquired(m_address, true, elapsed > 0 ? static_cast<std::uint64_t>(elapsed) : 0);
+			}
+		}
+
+		semaphore_wait(const semaphore_wait&) = delete;
+		semaphore_wait& operator=(const semaphore_wait&) = delete;
+
+	private:
+		std::uint32_t m_address;
+		bool m_active;
+		std::chrono::steady_clock::time_point m_started{};
+	};
 
 	template <typename Consumer>
 	bool tick(Consumer&& consume, bool force = false)
