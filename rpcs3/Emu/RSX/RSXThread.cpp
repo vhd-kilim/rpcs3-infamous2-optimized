@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "RSXThread.h"
 #include "RSXDiagnostics.h"
+#include "RSXFlushDiagnostics.h"
 
 #include "Capture/rsx_capture.h"
 #include "Common/surface_store.h"
@@ -300,6 +301,38 @@ namespace rsx
 		const auto& o = sample.semaphore_overflow;
 		fmt::append(text, "],\"sem_overflow\":[%llu,%llu,%llu,%llu]}", o.acquires, o.waits, o.wait_ns / 1000, o.max_wait_ns / 1000);
 		perf_log.notice("%s", text);
+
+		// Fault-driven texture-cache flushes in the same window, from every thread.
+		const auto flushes = diagnostics::flushes::global().take();
+		std::string flush_text = fmt::format("RSX_FLUSH {\"wall_us\":%llu,\"flips\":%llu,\"rsx_services\":%llu,\"rsx_queue_flush_us\":%llu,"
+			"\"rsx_consumer_wait_us\":%llu,\"rsx_max_consumer_wait_us\":%llu,"
+			"\"site_order\":[\"kind\",\"thread\",\"module\",\"pc\",\"lr\",\"write\",\"base\",\"width\",\"height\",\"format\",\"context\","
+			"\"events\",\"sections\",\"bytes\",\"service_us\",\"transfer_us\",\"max_us\"],\"sites\":[",
+			sample.elapsed_ns / 1000, sample.flips, flushes.rsx_services, flushes.rsx_queue_flush_ns / 1000,
+			flushes.rsx_consumer_wait_ns / 1000, flushes.rsx_max_consumer_wait_ns / 1000);
+		bool first_site = true;
+		const auto append_site = [&](const diagnostics::flushes::sample& f)
+		{
+			if (!first_site) flush_text += ',';
+			first_site = false;
+			fmt::append(flush_text, "[%u,\"%s\",\"%s\",%u,%u,%u,%u,%u,%u,%u,%u,%llu,%llu,%llu,%llu,%llu,%llu]",
+				static_cast<u32>(f.kind), f.thread.data(), f.module.data(), f.pc, f.lr, f.writing ? 1u : 0u, f.base,
+				f.width, f.height, f.format, f.context_mask, f.events, f.sections, f.bytes,
+				f.service_ns / 1000, f.transfer_ns / 1000, f.max_ns / 1000);
+		};
+		for (const auto& f : flushes.slots)
+		{
+			if (!f.events) break;
+			append_site(f);
+		}
+		flush_text += "],\"overflow\":[";
+		first_site = true;
+		if (flushes.overflow.events)
+		{
+			append_site(flushes.overflow);
+		}
+		flush_text += "]}";
+		perf_log.notice("%s", flush_text);
 	}
 
 	std::function<bool(u32 addr, bool is_writing)> g_access_violation_handler;

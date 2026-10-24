@@ -130,6 +130,23 @@ namespace infamous2::spu_precision
 		return nullptr;
 	}
 
+	// Diagnostics only: name the job module (any group) whose code is in LS around pc.
+	// Compares the aligned 64-byte block containing pc with the EBOOT copy.
+	inline const char* identify_ls(const u8* ls, u32 pc)
+	{
+		if (!ls || pc < module_ls_base || pc >= 0x40000) return nullptr;
+
+		const u32 block = pc & ~63u;
+		const u32 offset = block - module_ls_base;
+		for (const auto& m : modules)
+		{
+			if (offset + 64 > m.size || !vm::check_addr(m.va + offset, vm::page_readable, 64)) continue;
+			if (std::memcmp(ls + block, vm::_ptr<const u8>(m.va + offset), 64) == 0) return m.name;
+		}
+
+		return nullptr;
+	}
+
 	inline xfloat_accuracy select(u32 lower_bound, const u32* data, usz words, xfloat_accuracy configured)
 	{
 		if (requested_groups().empty() || configured == xfloat_accuracy::relaxed || !identity_matches())
