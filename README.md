@@ -1,6 +1,12 @@
 RPCS3
 =====
 
+This fork investigates inFAMOUS 2 (BCUS98125 01.04) performance and rendering.
+See the [project notes, measured results and experimental options](docs/infamous2/README.md).
+The Turbo v3 results are specific to the tested route and hardware. The newer
+RSX notification wait remains experimental and did not improve FPS in its first
+comparison; it is disabled by default. Game binaries and assets are not included.
+
 [![GitHub Actions](https://img.shields.io/github/actions/workflow/status/RPCS3/rpcs3/rpcs3.yml?branch=master&logo=github&label=Actions)](https://github.com/RPCS3/rpcs3/actions/workflows/rpcs3.yml)
 [![RPCS3 Discord Server](https://img.shields.io/discord/272035812277878785?color=5865F2&label=RPCS3%20Discord&logo=discord&logoColor=white)](https://discord.gg/rpcs3)
 

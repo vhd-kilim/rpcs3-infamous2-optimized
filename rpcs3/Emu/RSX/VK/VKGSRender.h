@@ -177,6 +177,16 @@ private:
 	VkViewport m_viewport {};
 	VkRect2D m_scissor {};
 
+	// Observation only: populated during the guarded native inFAMOUS 2 capture.
+	bool m_infamous2_vk_candidate = false;
+	u32 m_infamous2_vk_binding_attempt = 0;
+	u32 m_infamous2_vk_emitted_groups = 0;
+	u32 m_infamous2_vk_emitted_commands = 0;
+	u64 m_infamous2_vk_ubo_capture_id = 0;
+	u64 m_infamous2_vk_budget_exhausted_capture_id = 0;
+	u16 m_infamous2_vk_ubo_mask = 0;
+	rsx::fragment_program_texture_config m_infamous2_vk_ubo_snapshot{};
+
 	std::vector<u8> m_draw_buffers;
 
 	shared_mutex m_flush_queue_mutex;
@@ -250,6 +260,13 @@ private:
 	void load_texture_env();
 	bool bind_texture_env();
 	bool bind_interpreter_texture_env();
+
+	bool infamous2_capture_vk_candidate() const;
+	void record_infamous2_capture_vk(const char* kind, const std::string& fields);
+	void record_infamous2_capture_vk_ubo(bool updated);
+	void record_infamous2_capture_vk_texture(u32 sampler, vk::image_view* view, const char* path, bool deferred,
+		vk::image_view* primary_view = nullptr, const vk::sampler* bound_sampler = nullptr);
+	void record_infamous2_capture_vk_draw(u32 sub_index, u32 vertices, bool indexed, u32 instances, u32 first, u32 ranges, const char* api);
 
 public:
 	void init_buffers(rsx::framebuffer_creation_context context, bool skip_reading = false);

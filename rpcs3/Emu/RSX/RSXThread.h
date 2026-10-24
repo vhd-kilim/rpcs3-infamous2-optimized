@@ -106,6 +106,23 @@ namespace rsx
 	// TODO: This class is a mess, this needs to be broken into smaller chunks, like I did for RSXFIFO and RSXZCULL (kd)
 	class thread : public cpu_thread, public GCM_context, public GRAPH_backend
 	{
+		// Opt-in metadata for one native RSX capture; never a guest PPC backtrace.
+		struct infamous2_capture_state
+		{
+			bool active = false;
+			u64 id = 0;
+			u64 commands = 0;
+			u64 draw_batches = 0;
+			u64 records = 0;
+			u64 backend_events = 0;
+			u64 backend_records = 0;
+		} m_infamous2_capture;
+
+		void begin_infamous2_capture();
+		void record_infamous2_capture_command(u32 reg, u32 value, u64 rrc_cursor_before);
+		void record_infamous2_capture_draw_batch(u32 element_count);
+		void end_infamous2_capture(bool rrc_saved, u64 rrc_commands);
+
 		u64 timestamp_ctrl = 0;
 		u64 timestamp_subvalue = 0;
 		u64 m_cycles_counter = 0;
@@ -114,6 +131,17 @@ namespace rsx
 
 		void cpu_task() override;
 	protected:
+		struct infamous2_capture_context
+		{
+			bool active = false;
+			u64 id = 0;
+			u64 commands = 0;
+			u64 next_logical_batch = 0;
+			u64 rrc_cursor = 0;
+		};
+
+		infamous2_capture_context get_infamous2_capture_context() const;
+		bool reserve_infamous2_capture_backend_record(u64& event_index);
 
 		s32 m_skip_frame_ctr = 0;
 		bool skip_current_frame = false;

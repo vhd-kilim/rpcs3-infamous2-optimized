@@ -3,6 +3,7 @@
 #include "nv47_sync.hpp"
 
 #include "Emu/RSX/RSXThread.h"
+#include "Emu/RSX/RSXDiagnostics.h"
 #include "Emu/system_config.h"
 
 #include "context_accessors.define.h"
@@ -38,8 +39,15 @@ namespace rsx
 			RSX(ctx)->last_sema_cmd = RSX(ctx)->fifo_ctrl->get_pos() - 4;
 			RSX(ctx)->last_sema_addr = addr;
 
+			const bool diagnostic_active = diagnostics::enabled() && RSX(ctx)->is_current_thread();
+
 			if (sema == arg)
 			{
+				if (diagnostic_active)
+				{
+					diagnostics::semaphore_acquired(addr, false, 0);
+				}
+
 				// Flip semaphore doesnt need wake-up delay
 				if (addr != RSX(ctx)->label_addr + 0x10)
 				{
@@ -57,47 +65,52 @@ namespace rsx
 			u64 start = get_system_time();
 			u64 last_check_val = start;
 
-			while (sema != arg)
 			{
-				if (RSX(ctx)->test_stopped())
-				{
-					RSX(ctx)->state += cpu_flag::again;
-					return;
-				}
+				diagnostics::scope diagnostic_wait(diagnostics::bucket::semaphore_wait, diagnostic_active);
+				diagnostics::semaphore_wait diagnostic_address_wait(addr, diagnostic_active);
 
-				if (const auto tdr = static_cast<u64>(g_cfg.video.driver_recovery_timeout))
+				while (sema != arg)
 				{
-					const u64 current = get_system_time();
-
-					if (current - last_check_val > 20'000)
+					if (RSX(ctx)->test_stopped())
 					{
-						// Suspicious amnount of time has passed
-						// External pause such as debuggers' pause or operating system sleep may have taken place
-						// Ignore it
-						start += current - last_check_val;
+						RSX(ctx)->state += cpu_flag::again;
+						return;
 					}
 
-					last_check_val = current;
-
-					if ((current - start) > tdr)
+					if (const auto tdr = static_cast<u64>(g_cfg.video.driver_recovery_timeout))
 					{
-						// If longer than driver timeout force exit
-						rsx_log.error("nv406e::semaphore_acquire has timed out. semaphore_address=0x%X", addr);
-						break;
+						const u64 current = get_system_time();
+
+						if (current - last_check_val > 20'000)
+						{
+							// Suspicious amnount of time has passed
+							// External pause such as debuggers' pause or operating system sleep may have taken place
+							// Ignore it
+							start += current - last_check_val;
+						}
+
+						last_check_val = current;
+
+						if ((current - start) > tdr)
+						{
+							// If longer than driver timeout force exit
+							rsx_log.error("nv406e::semaphore_acquire has timed out. semaphore_address=0x%X", addr);
+							break;
+						}
 					}
+
+					if (RSX(ctx)->external_interrupt_lock ||
+						(RSX(ctx)->state & (cpu_flag::dbg_global_pause + cpu_flag::exit)) == cpu_flag::dbg_global_pause)
+					{
+						RSX(ctx)->cpu_wait({});
+						continue;
+					}
+
+					RSX(ctx)->on_semaphore_acquire_wait();
+
+					// Wait until the value changes or until 100us pass.
+					utils::spin_on_cacheline_once(atomic_sema, sema, 100);
 				}
-
-				if (RSX(ctx)->external_interrupt_lock ||
-					(RSX(ctx)->state & (cpu_flag::dbg_global_pause + cpu_flag::exit)) == cpu_flag::dbg_global_pause)
-				{
-					RSX(ctx)->cpu_wait({});
-					continue;
-				}
-
-				RSX(ctx)->on_semaphore_acquire_wait();
-
-				// Wait until the value changes or until 100us pass.
-				utils::spin_on_cacheline_once(atomic_sema, sema, 100);
 			}
 
 			RSX(ctx)->fifo_wake_delay();

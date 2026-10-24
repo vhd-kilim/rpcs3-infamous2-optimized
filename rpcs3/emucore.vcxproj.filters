@@ -2503,6 +2503,9 @@
     <ClInclude Include="Emu\RSX\Common\simple_array.hpp">
       <Filter>Emu\GPU\RSX\Common</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\RSX\Common\notification_wait.hpp">
+      <Filter>Emu\GPU\RSX\Common</Filter>
+    </ClInclude>
     <ClInclude Include="Emu\RSX\Common\profiling_timer.hpp">
       <Filter>Emu\GPU\RSX\Common</Filter>
     </ClInclude>
@@ -2831,6 +2834,9 @@
       <Filter>Emu\GPU\RSX\Game Window</Filter>
     </ClInclude>
     <ClInclude Include="Emu\RSX\RSXOffload.h">
+      <Filter>Emu\GPU\RSX\Host Mini-Driver</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\RSXDiagnostics.h">
       <Filter>Emu\GPU\RSX\Host Mini-Driver</Filter>
     </ClInclude>
     <ClInclude Include="Emu\RSX\RSXThread.h">

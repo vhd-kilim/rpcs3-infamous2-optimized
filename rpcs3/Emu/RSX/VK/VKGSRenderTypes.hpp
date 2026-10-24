@@ -6,6 +6,7 @@
 #include "VKResourceManager.h"
 
 #include "Emu/RSX/Common/simple_array.hpp"
+#include "Emu/RSX/Common/notification_wait.hpp"
 #include "Emu/RSX/Utils/rsx_utils.h"
 #include "Emu/RSX/rsx_cache.h"
 #include "Utilities/mutex.h"
@@ -226,6 +227,8 @@ namespace vk
 		atomic_t<bool> pending_state{ false };  //Flush request status; true if rsx::thread is yet to service this request
 		atomic_t<int> num_waiters{ 0 };  //Number of threads waiting for this request to be serviced
 		bool hard_sync = false;
+		// Set before the renderer starts servicing requests; immutable afterwards.
+		bool use_completion_notification = false;
 
 		flush_request_task() = default;
 
@@ -238,7 +241,10 @@ namespace vk
 
 		void remove_one()
 		{
-			num_waiters--;
+			if (num_waiters.fetch_sub(1) == 1 && use_completion_notification)
+			{
+				num_waiters.notify_all();
+			}
 		}
 
 		void clear_pending_flag()
@@ -254,6 +260,12 @@ namespace vk
 
 		void consumer_wait() const
 		{
+			if (use_completion_notification)
+			{
+				rsx::detail::wait_for_zero_notification(num_waiters, [] { utils::pause(); });
+				return;
+			}
+
 			utils::spin_wait(num_waiters, [](auto v)
 			{
 				return v == 0;

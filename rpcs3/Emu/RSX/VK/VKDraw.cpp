@@ -7,9 +7,88 @@
 #include "VKGSRender.h"
 #include "vkutils/buffer_object.h"
 #include "vkutils/chip_class.h"
+#include <bit>
+#include <type_traits>
 #include <vulkan/vulkan_core.h>
 
 #include "Emu/RSX/NV47/HW/context_accessors.define.h"
+
+namespace
+{
+	template <typename T>
+	u64 infamous2_vk_handle(T handle)
+	{
+		if constexpr (std::is_pointer_v<T>)
+		{
+			return reinterpret_cast<uptr>(handle);
+		}
+		else
+		{
+			return static_cast<u64>(handle);
+		}
+	}
+
+	// IEEE-754 bits keep the JSON valid even for NaN/Inf and preserve exact values.
+	u32 infamous2_float_bits(float value)
+	{
+		return std::bit_cast<u32>(value);
+	}
+
+	std::string infamous2_texture_params_json(const rsx::fragment_program_texture_config::TIU_slot& p)
+	{
+		return fmt::format("{\"scale_bits\":[%u,%u,%u],\"bias_bits\":[%u,%u,%u],"
+			"\"clamp\":%u,\"clamp_min_bits\":[%u,%u],\"clamp_max_bits\":[%u,%u],\"control\":%u,\"remap\":%u}",
+			infamous2_float_bits(p.scale[0]), infamous2_float_bits(p.scale[1]), infamous2_float_bits(p.scale[2]),
+			infamous2_float_bits(p.bias[0]), infamous2_float_bits(p.bias[1]), infamous2_float_bits(p.bias[2]),
+			(p.control >> rsx::texture_control_bits::CLAMP_TEXCOORDS_BIT) & 1,
+			infamous2_float_bits(p.clamp_min[0]), infamous2_float_bits(p.clamp_min[1]),
+			infamous2_float_bits(p.clamp_max[0]), infamous2_float_bits(p.clamp_max[1]), p.control, p.remap);
+	}
+
+	std::string infamous2_image_json(const vk::image* image, bool include_rtt = true)
+	{
+		if (!image)
+		{
+			return "null";
+		}
+
+		std::string result = fmt::format("{\"image\":%llu,\"uid\":%llu,\"extent\":[%u,%u,%u],\"format\":%u,\"samples\":%u,"
+			"\"type\":%u,\"mips\":%u,\"layers\":%u,\"aspect\":%u,\"layout\":%u,\"format_class\":%u",
+			infamous2_vk_handle(image->value), image->uid(), image->width(), image->height(), image->depth(),
+			static_cast<u32>(image->format()), image->samples(), static_cast<u32>(image->type()),
+			image->mipmaps(), image->layers(), image->aspect(), static_cast<u32>(image->current_layout), static_cast<u32>(image->format_class()));
+		if (const auto rtt = include_rtt ? vk::try_as_rtt(image) : nullptr)
+		{
+			result += fmt::format(",\"rtt\":{\"base_addr\":%u,\"guest_extent\":[%u,%u],\"guest_pitch\":%u,\"native_pitch\":%u,"
+				"\"scale_percent\":%u,\"min_scalable_dimension\":%u,\"aa_mode\":%u,\"spp\":%u,\"samples_xy\":[%u,%u],\"resolve\":%s}",
+				rtt->base_addr, rtt->surface_width, rtt->surface_height, rtt->rsx_pitch, rtt->native_pitch,
+				rtt->resolution_scaling_config.scale_percent, rtt->resolution_scaling_config.min_scalable_dimension,
+				static_cast<u32>(rtt->aa_mode), rtt->spp, rtt->samples_x, rtt->samples_y,
+				infamous2_image_json(rtt->resolve_surface.get(), false));
+		}
+		return result + '}';
+	}
+
+	std::string infamous2_view_json(const vk::image_view* view)
+	{
+		if (!view)
+		{
+			return "null";
+		}
+		const auto image = view->image();
+		const auto& range = view->info.subresourceRange;
+		const u32 mip = std::min(range.baseMipLevel, 31u);
+		return fmt::format("{\"view\":%llu,\"format\":%u,\"type\":%u,\"aspect\":%u,"
+			"\"base_mip\":%u,\"mip_count\":%u,\"base_layer\":%u,\"layer_count\":%u,\"components\":[%u,%u,%u,%u],"
+			"\"extent_at_base_mip\":[%u,%u,%u],\"resource\":%s}",
+			infamous2_vk_handle(view->value), static_cast<u32>(view->info.format), static_cast<u32>(view->info.viewType),
+			range.aspectMask, range.baseMipLevel, range.levelCount, range.baseArrayLayer, range.layerCount,
+			static_cast<u32>(view->info.components.r), static_cast<u32>(view->info.components.g),
+			static_cast<u32>(view->info.components.b), static_cast<u32>(view->info.components.a),
+			image ? std::max(1u, image->width() >> mip) : 0, image ? std::max(1u, image->height() >> mip) : 0,
+			image ? std::max(1u, image->depth() >> mip) : 0, infamous2_image_json(image));
+	}
+}
 
 namespace vk
 {
@@ -120,6 +199,214 @@ namespace vk
 			break;
 		}
 	}
+}
+
+bool VKGSRender::infamous2_capture_vk_candidate() const
+{
+	const auto capture = get_infamous2_capture_context();
+	if (!capture.active || m_infamous2_vk_budget_exhausted_capture_id == capture.id)
+	{
+		return false;
+	}
+
+	const auto& r = rsx::method_registers;
+	const u32 w = r.surface_clip_width();
+	const u32 h = r.surface_clip_height();
+	// A state catalog, not a semantic identification of fire, smoke or depth effects.
+	return (w == 512 && h == 288) || (w == 1280 && h == 180) || (w == 320 && h == 180) ||
+		(w == 1280 && h == 720 && r.blend_enabled_mask() && !r.depth_write_enabled());
+}
+
+void VKGSRender::record_infamous2_capture_vk(const char* kind, const std::string& fields)
+{
+	const auto capture = get_infamous2_capture_context();
+	if (!capture.active || m_infamous2_vk_budget_exhausted_capture_id == capture.id)
+	{
+		return;
+	}
+	u64 event_index = 0;
+	if (!reserve_infamous2_capture_backend_record(event_index))
+	{
+		m_infamous2_vk_budget_exhausted_capture_id = capture.id;
+		return;
+	}
+
+	// The cursor and logical batch are hints at this backend hook. They are not
+	// a 1:1 GPU draw mapping; a clause can merge ranges or emit several commands.
+	rsx_log.notice("INFAMOUS2_CAPTURE_VK {\"schema\":1,\"capture_id\":%llu,\"event_index\":%llu,"
+		"\"logical_batch_index_hint\":%llu,\"command_count\":%llu,\"rrc_cursor\":%llu,\"kind\":\"%s\",%s}",
+		capture.id, event_index, capture.next_logical_batch, capture.commands, capture.rrc_cursor, kind, fields);
+}
+
+void VKGSRender::record_infamous2_capture_vk_ubo(bool updated)
+{
+	const auto capture = get_infamous2_capture_context();
+	if (!capture.active)
+	{
+		return;
+	}
+	if (updated)
+	{
+		// Cache only existing host parameters, never guest shader/texture memory.
+		m_infamous2_vk_ubo_snapshot = current_fragment_program.texture_params;
+		m_infamous2_vk_ubo_capture_id = capture.id;
+		m_infamous2_vk_ubo_mask = current_fp_metadata.referenced_textures_mask;
+	}
+	if (!m_infamous2_vk_candidate || m_infamous2_vk_budget_exhausted_capture_id == capture.id)
+	{
+		return;
+	}
+
+	std::string params = "[";
+	for (u32 refs = current_fp_metadata.referenced_textures_mask, i = 0; refs; refs >>= 1, ++i)
+	{
+		if (!(refs & 1)) continue;
+		if (params.size() > 1) params += ',';
+		params += fmt::format("{\"sampler\":%u,\"params\":%s}", i,
+			infamous2_texture_params_json(current_fragment_program.texture_params[i]));
+	}
+	params += ']';
+	record_infamous2_capture_vk("ubo", fmt::format("\"updated\":%u,\"referenced_texture_mask\":%u,"
+		"\"buffer\":%llu,\"buffer_offset\":%llu,\"dynamic_offset\":%llu,\"range\":%llu,\"params\":%s,"
+		"\"snapshot_current_capture\":%u,\"snapshot_mask\":%u",
+		static_cast<u32>(updated), current_fp_metadata.referenced_textures_mask,
+		infamous2_vk_handle(m_fragment_texture_params_buffer_info.buffer), m_fragment_texture_params_buffer_info.offset,
+		m_texture_parameters_dynamic_offset, m_fragment_texture_params_buffer_info.range, params,
+		static_cast<u32>(m_infamous2_vk_ubo_capture_id == capture.id), m_infamous2_vk_ubo_mask));
+}
+
+void VKGSRender::record_infamous2_capture_vk_texture(u32 sampler, vk::image_view* view, const char* path, bool deferred,
+	vk::image_view* primary_view, const vk::sampler* bound_sampler)
+{
+	const auto capture = get_infamous2_capture_context();
+	if (!m_infamous2_vk_candidate || !capture.active || m_infamous2_vk_budget_exhausted_capture_id == capture.id)
+	{
+		return;
+	}
+
+	const auto& tex = rsx::method_registers.fragment_textures[sampler];
+	const auto desc = static_cast<const vk::texture_cache::sampled_image_descriptor*>(fs_sampler_state[sampler].get());
+	const bool valid = tex.enabled() && desc && desc->validate();
+	std::string descriptor = "null";
+	std::string source = "null";
+	std::string reference_surface = "null";
+	u32 copy_count = 0;
+	if (valid)
+	{
+		const auto& x = desc->texcoord_xform;
+		// The disabled clamp arrays need not be initialized by descriptor constructors.
+		const std::string clamp = x.clamp ? fmt::format("{\"min_bits\":[%u,%u],\"max_bits\":[%u,%u]}",
+			infamous2_float_bits(x.clamp_min[0]), infamous2_float_bits(x.clamp_min[1]),
+			infamous2_float_bits(x.clamp_max[0]), infamous2_float_bits(x.clamp_max[1])) : "null";
+		descriptor = fmt::format("{\"upload_context\":%u,\"ref_address\":%u,\"image_type\":%u,\"format_class\":%u,"
+			"\"samples\":%u,\"cyclic\":%u,\"surface_cache_tag\":%llu,\"format_bits\":%u,\"host_features\":%u,"
+			"\"scale_bits\":[%u,%u,%u],\"bias_bits\":[%u,%u,%u],\"clamp\":%u,\"clamp_bounds\":%s}",
+			static_cast<u32>(desc->upload_context), desc->ref_address, static_cast<u32>(desc->image_type), static_cast<u32>(desc->format_class),
+			desc->samples, static_cast<u32>(desc->is_cyclic_reference), desc->surface_cache_tag, desc->format_ex.format_bits, desc->format_ex.host_features,
+			infamous2_float_bits(x.scale[0]), infamous2_float_bits(x.scale[1]), infamous2_float_bits(x.scale[2]),
+			infamous2_float_bits(x.bias[0]), infamous2_float_bits(x.bias[1]), infamous2_float_bits(x.bias[2]), static_cast<u32>(x.clamp), clamp);
+		if (deferred)
+		{
+			const auto& sub = desc->external_subresource_desc;
+			copy_count = ::size32(sub.sections_to_copy);
+			source = fmt::format("{\"operation\":%u,\"desired_extent\":[%u,%u,%u],\"address\":%u,\"pitch\":%u,"
+				"\"external_ref_addr\":%u,\"copy_region_count\":%u,\"copy_regions_limited\":%u,\"src0\":%s}",
+				static_cast<u32>(sub.op), sub.width, sub.height, sub.depth, sub.address, sub.pitch, sub.external_ref_addr,
+				copy_count, static_cast<u32>(copy_count > 8), infamous2_image_json(sub.src0()));
+		}
+		if (desc->upload_context == rsx::texture_upload_context::framebuffer_storage && desc->ref_address)
+		{
+			// Read-only exact-address cache lookup. Presence alone does not prove lineage.
+			if (const auto rtt = m_rtts.get_surface_at(desc->ref_address))
+			{
+				const auto host = view ? view->image() : nullptr;
+				reference_surface = fmt::format("{\"matches_image\":%u,\"matches_resolve\":%u,\"resource\":%s}",
+					static_cast<u32>(host == rtt), static_cast<u32>(host && host == rtt->resolve_surface.get()), infamous2_image_json(rtt));
+			}
+		}
+	}
+
+	const bool snapshot_valid = m_infamous2_vk_ubo_capture_id == capture.id && (m_infamous2_vk_ubo_mask & (1u << sampler));
+	std::string host_sampler = "null";
+	if (bound_sampler)
+	{
+		const auto& s = bound_sampler->info;
+		host_sampler = fmt::format("{\"handle\":%llu,\"min_filter\":%u,\"mag_filter\":%u,\"mipmap_mode\":%u,\"address_modes\":[%u,%u,%u],"
+			"\"unnormalized\":%u,\"compare_enable\":%u,\"compare_op\":%u,\"lod_bias_bits\":%u,\"min_lod_bits\":%u,\"max_lod_bits\":%u}",
+			infamous2_vk_handle(bound_sampler->value), static_cast<u32>(s.minFilter), static_cast<u32>(s.magFilter), static_cast<u32>(s.mipmapMode),
+			static_cast<u32>(s.addressModeU), static_cast<u32>(s.addressModeV), static_cast<u32>(s.addressModeW),
+			s.unnormalizedCoordinates, s.compareEnable, static_cast<u32>(s.compareOp), infamous2_float_bits(s.mipLodBias),
+			infamous2_float_bits(s.minLod), infamous2_float_bits(s.maxLod));
+	}
+	const auto [fp_offset, fp_location] = rsx::method_registers.shader_program_address();
+	record_infamous2_capture_vk("texture", fmt::format("\"sampler\":%u,\"binding_attempt\":%u,\"path\":\"%s\",\"deferred\":%u,"
+		"\"fp_offset\":%u,\"fp_location\":%u,\"fp_ucode_bytes\":%u,\"fp_hash_available\":0,\"cache_fp_id\":%u,\"fp_module\":%llu,"
+		"\"interpreter\":%u,\"referenced_texture_mask\":%u,\"redirected_texture_mask\":%u,\"shadow_texture_mask\":%u,\"msaa_texture_mask\":%u,"
+		"\"guest\":{\"enabled\":%u,\"offset\":%u,\"location\":%u,\"extent\":[%u,%u,%u],\"pitch\":%u,\"format\":%u,\"remap\":%u,"
+		"\"zfunc\":%u,\"min_filter\":%u,\"mag_filter\":%u,\"wrap\":[%u,%u,%u]},\"host_sampler\":%s,"
+		"\"descriptor_valid\":%u,\"descriptor\":%s,\"view\":%s,\"primary_view\":%s,\"deferred_source\":%s,\"reference_surface_at_address\":%s,"
+		"\"effective_params\":%s,\"ubo_snapshot_valid\":%u,\"ubo_snapshot\":%s",
+		sampler, m_infamous2_vk_binding_attempt, path, static_cast<u32>(deferred), fp_offset, fp_location, current_fp_metadata.program_ucode_length,
+		m_fragment_prog ? m_fragment_prog->id : 0, m_fragment_prog ? infamous2_vk_handle(m_fragment_prog->handle) : 0,
+		static_cast<u32>(m_shader_interpreter.is_interpreter(m_program)), current_fp_metadata.referenced_textures_mask,
+		current_fragment_program.texture_state.redirected_textures, current_fragment_program.texture_state.shadow_textures,
+		current_fragment_program.texture_state.multisampled_textures,
+		static_cast<u32>(tex.enabled()), tex.offset(), tex.location(), tex.width(), tex.height(), tex.depth(), tex.pitch(), tex.format(), tex.remap(),
+		static_cast<u32>(tex.zfunc()), static_cast<u32>(tex.min_filter()), static_cast<u32>(tex.mag_filter()),
+		static_cast<u32>(tex.wrap_s()), static_cast<u32>(tex.wrap_t()), static_cast<u32>(tex.wrap_r()), host_sampler,
+		static_cast<u32>(valid), descriptor, infamous2_view_json(view), infamous2_view_json(primary_view), source, reference_surface,
+		infamous2_texture_params_json(current_fragment_program.texture_params[sampler]), static_cast<u32>(snapshot_valid),
+		snapshot_valid ? infamous2_texture_params_json(m_infamous2_vk_ubo_snapshot[sampler]) : "null"));
+
+	for (u32 i = 0; i < std::min(copy_count, 8u) && m_infamous2_vk_budget_exhausted_capture_id != capture.id; ++i)
+	{
+		const auto& region = desc->external_subresource_desc.sections_to_copy[i];
+		record_infamous2_capture_vk("copy_region", fmt::format("\"sampler\":%u,\"binding_attempt\":%u,\"region_index\":%u,"
+			"\"base_addr\":%u,\"level\":%u,\"src_rect\":[%u,%u,%u,%u],\"dst_rect\":[%u,%u,%u,%u,%u],\"xform\":%u,\"source\":%s",
+			sampler, m_infamous2_vk_binding_attempt, i, region.base_addr, region.level,
+			region.src_x, region.src_y, region.src_w, region.src_h, region.dst_x, region.dst_y, region.dst_z, region.dst_w, region.dst_h,
+			region.xform, infamous2_image_json(region.src)));
+	}
+}
+
+void VKGSRender::record_infamous2_capture_vk_draw(u32 sub_index, u32 vertices, bool indexed, u32 instances, u32 first, u32 ranges, const char* api)
+{
+	if (!m_infamous2_vk_candidate || !get_infamous2_capture_context().active)
+	{
+		return;
+	}
+	const auto& clause = rsx::method_registers.current_draw_clause;
+	m_infamous2_vk_emitted_commands++;
+	if (m_infamous2_vk_budget_exhausted_capture_id == get_infamous2_capture_context().id) return;
+
+	std::string colors = "[";
+	for (u32 i = 0; i < m_rtts.m_bound_render_targets.size(); ++i)
+	{
+		if (i) colors += ',';
+		colors += infamous2_image_json(m_rtts.m_bound_render_targets[i].second);
+	}
+	colors += ']';
+	std::string framebuffer_images = "[";
+	for (const auto image : m_fbo_images)
+	{
+		if (framebuffer_images.size() > 1) framebuffer_images += ',';
+		framebuffer_images += infamous2_image_json(image);
+	}
+	framebuffer_images += ']';
+	const auto [fp_offset, fp_location] = rsx::method_registers.shader_program_address();
+	record_infamous2_capture_vk("draw_emit", fmt::format("\"rsx_sub_index\":%u,\"host_subdraw_id\":%u,\"vertices\":%u,\"indexed\":%u,"
+		"\"api\":\"%s\",\"instances\":%u,\"first\":%u,\"pass_count\":%u,\"range_count\":%u,\"host_command_count\":1,\"conditional_hw\":%u,"
+		"\"framebuffer\":[%u,%u],\"viewport_bits\":[%u,%u,%u,%u,%u,%u],\"scissor\":[%d,%d,%u,%u],"
+		"\"color_attachments\":%s,\"depth_attachment\":%s,\"framebuffer_images\":%s,\"referenced_texture_mask\":%u,"
+		"\"fp_offset\":%u,\"fp_location\":%u,\"fp_ucode_bytes\":%u,\"fp_hash_available\":0,\"cache_fp_id\":%u,\"fp_module\":%llu,\"interpreter\":%u",
+		sub_index, m_current_draw.subdraw_id, vertices, static_cast<u32>(indexed), api, instances, first, clause.pass_count(), ranges,
+		static_cast<u32>(cond_render_ctrl.hw_cond_active), m_draw_fbo->width(), m_draw_fbo->height(),
+		infamous2_float_bits(m_viewport.x), infamous2_float_bits(m_viewport.y), infamous2_float_bits(m_viewport.width), infamous2_float_bits(m_viewport.height),
+		infamous2_float_bits(m_viewport.minDepth), infamous2_float_bits(m_viewport.maxDepth),
+		m_scissor.offset.x, m_scissor.offset.y, m_scissor.extent.width, m_scissor.extent.height,
+		colors, infamous2_image_json(m_rtts.m_bound_depth_stencil.second), framebuffer_images, current_fp_metadata.referenced_textures_mask,
+		fp_offset, fp_location, current_fp_metadata.program_ucode_length, m_fragment_prog ? m_fragment_prog->id : 0,
+		m_fragment_prog ? infamous2_vk_handle(m_fragment_prog->handle) : 0, static_cast<u32>(m_shader_interpreter.is_interpreter(m_program))));
 }
 
 void VKGSRender::begin_render_pass()
@@ -695,6 +982,7 @@ bool VKGSRender::bind_texture_env()
 
 		if (view) [[likely]]
 		{
+			record_infamous2_capture_vk_texture(i, view, "recompiler", !sampler_state->image_handle, nullptr, fs_sampler_handles[i]);
 			m_program->bind_uniform({ *view, *fs_sampler_handles[i] },
 				vk::glsl::binding_set_index_fragment,
 				m_fs_binding_table->ftex_location[i]);
@@ -716,6 +1004,7 @@ bool VKGSRender::bind_texture_env()
 						VK_BORDER_COLOR_INT_OPAQUE_BLACK);
 				}
 
+				record_infamous2_capture_vk_texture(i, stencil_view, "recompiler_stencil", false, view, m_stencil_mirror_sampler.get());
 				m_program->bind_uniform({ *stencil_view, *m_stencil_mirror_sampler },
 					vk::glsl::binding_set_index_fragment,
 					m_fs_binding_table->ftex_stencil_location[i]);
@@ -724,7 +1013,9 @@ bool VKGSRender::bind_texture_env()
 		else
 		{
 			const VkImageViewType view_type = vk::get_view_type(current_fragment_program.get_texture_dimension(i));
-			const VkDescriptorImageInfoEx desc = { *vk::null_image_view(*m_current_command_buffer, view_type), vk::null_sampler() };
+			const auto fallback_view = vk::null_image_view(*m_current_command_buffer, view_type);
+			const VkDescriptorImageInfoEx desc = { *fallback_view, vk::null_sampler() };
+			record_infamous2_capture_vk_texture(i, fallback_view, "recompiler_fallback", false);
 			m_program->bind_uniform(desc,
 				vk::glsl::binding_set_index_fragment,
 				m_fs_binding_table->ftex_location[i]);
@@ -832,9 +1123,11 @@ bool VKGSRender::bind_interpreter_texture_env()
 	}
 
 	std::array<VkDescriptorImageInfoEx, 68> texture_env;
+	std::array<vk::image_view*, 4> fallback_views{};
+	fallback_views[0] = vk::null_image_view(*m_current_command_buffer, VK_IMAGE_VIEW_TYPE_1D);
 	VkDescriptorImageInfoEx fallback =
 	{
-		*vk::null_image_view(*m_current_command_buffer, VK_IMAGE_VIEW_TYPE_1D),
+		*fallback_views[0],
 		vk::null_sampler()
 	};
 
@@ -847,17 +1140,20 @@ bool VKGSRender::bind_interpreter_texture_env()
 	std::fill(start, end, fallback);
 	// 2D
 	start = end;
-	fallback.imageView = vk::null_image_view(*m_current_command_buffer, VK_IMAGE_VIEW_TYPE_2D)->value;
+	fallback_views[1] = vk::null_image_view(*m_current_command_buffer, VK_IMAGE_VIEW_TYPE_2D);
+	fallback.imageView = fallback_views[1]->value;
 	std::advance(end, 16);
 	std::fill(start, end, fallback);
 	// 3D
 	start = end;
-	fallback.imageView = vk::null_image_view(*m_current_command_buffer, VK_IMAGE_VIEW_TYPE_3D)->value;
+	fallback_views[3] = vk::null_image_view(*m_current_command_buffer, VK_IMAGE_VIEW_TYPE_3D);
+	fallback.imageView = fallback_views[3]->value;
 	std::advance(end, 16);
 	std::fill(start, end, fallback);
 	// CUBE
 	start = end;
-	fallback.imageView = vk::null_image_view(*m_current_command_buffer, VK_IMAGE_VIEW_TYPE_CUBE)->value;
+	fallback_views[2] = vk::null_image_view(*m_current_command_buffer, VK_IMAGE_VIEW_TYPE_CUBE);
+	fallback.imageView = fallback_views[2]->value;
 	std::advance(end, 16);
 	std::fill(start, end, fallback);
 
@@ -945,6 +1241,8 @@ bool VKGSRender::bind_interpreter_texture_env()
 		if (!view)
 		{
 			// OOM or disabled texture
+			record_infamous2_capture_vk_texture(i, fallback_views[static_cast<u32>(current_fragment_program.get_texture_dimension(i))],
+				"interpreter_fallback", false);
 			continue;
 		}
 
@@ -970,6 +1268,8 @@ bool VKGSRender::bind_interpreter_texture_env()
 				{
 					// OOM
 					out_of_memory = true;
+					record_infamous2_capture_vk_texture(i, fallback_views[static_cast<u32>(sampler_state->image_type)],
+						"interpreter_decay_fallback", false, primary_view);
 					continue;
 				}
 			}
@@ -982,6 +1282,7 @@ bool VKGSRender::bind_interpreter_texture_env()
 
 		const int offsets[] = { 0, 16, 48, 32 };
 		auto& sampled_image_info = texture_env[offsets[static_cast<u32>(sampler_state->image_type)] + i];
+		record_infamous2_capture_vk_texture(i, view, "interpreter", !sampler_state->image_handle, primary_view, fs_sampler_handles[i]);
 		sampled_image_info = { *view, *fs_sampler_handles[i] };
 	}
 
@@ -1023,6 +1324,10 @@ void VKGSRender::emit_geometry(u32 sub_index)
 	if ((state_flags & vertex_state_mask) && !m_vertex_layout.validate())
 	{
 		// No vertex inputs enabled
+		if (m_infamous2_vk_candidate)
+		{
+			record_infamous2_capture_vk("skip", fmt::format("\"reason\":\"invalid_vertex_layout\",\"rsx_sub_index\":%u", sub_index));
+		}
 		// Execute remainining pipeline barriers with NOP draw
 		do
 		{
@@ -1039,6 +1344,10 @@ void VKGSRender::emit_geometry(u32 sub_index)
 	if (!upload_info.vertex_draw_count)
 	{
 		// Malformed vertex setup; abort
+		if (m_infamous2_vk_candidate)
+		{
+			record_infamous2_capture_vk("skip", fmt::format("\"reason\":\"zero_vertex_draw_count\",\"rsx_sub_index\":%u", sub_index));
+		}
 		return;
 	}
 
@@ -1172,21 +1481,25 @@ void VKGSRender::emit_geometry(u32 sub_index)
 
 	// Bind the new set of descriptors for use with this draw call
 	m_frame_stats.setup_time += m_profiler.duration();
+	if (m_infamous2_vk_candidate) m_infamous2_vk_emitted_groups++;
 
 	if (!upload_info.index_info)
 	{
 		if (draw_call.is_trivial_instanced_draw)
 		{
+			if (m_infamous2_vk_candidate) record_infamous2_capture_vk_draw(sub_index, upload_info.vertex_draw_count, false, draw_call.pass_count(), 0, 1, "vkCmdDraw");
 			vkCmdDraw(*m_current_command_buffer, upload_info.vertex_draw_count, draw_call.pass_count(), 0, 0);
 		}
 		else if (draw_call.is_single_draw())
 		{
+			if (m_infamous2_vk_candidate) record_infamous2_capture_vk_draw(sub_index, upload_info.vertex_draw_count, false, 1, 0, 1, "vkCmdDraw");
 			vkCmdDraw(*m_current_command_buffer, upload_info.vertex_draw_count, 1, 0, 0);
 		}
 		else if (m_device->get_multidraw_support())
 		{
 			const auto& subranges = draw_call.get_subranges();
 			auto ptr = utils::bless<const VkMultiDrawInfoEXT>(&subranges.front().first);
+			if (m_infamous2_vk_candidate) record_infamous2_capture_vk_draw(sub_index, upload_info.vertex_draw_count, false, 1, 0, ::size32(subranges), "vkCmdDrawMultiEXT");
 			_vkCmdDrawMultiEXT(*m_current_command_buffer, ::size32(subranges), ptr, 1, 0, sizeof(rsx::draw_range_t));
 		}
 		else
@@ -1195,6 +1508,7 @@ void VKGSRender::emit_geometry(u32 sub_index)
 			const auto& subranges = draw_call.get_subranges();
 			for (const auto& range : subranges)
 			{
+				if (m_infamous2_vk_candidate) record_infamous2_capture_vk_draw(sub_index, range.count, false, 1, vertex_offset, 1, "vkCmdDraw");
 				vkCmdDraw(*m_current_command_buffer, range.count, 1, vertex_offset, 0);
 				vertex_offset += range.count;
 			}
@@ -1209,10 +1523,12 @@ void VKGSRender::emit_geometry(u32 sub_index)
 
 		if (draw_call.is_trivial_instanced_draw)
 		{
+			if (m_infamous2_vk_candidate) record_infamous2_capture_vk_draw(sub_index, upload_info.vertex_draw_count, true, draw_call.pass_count(), 0, 1, "vkCmdDrawIndexed");
 			vkCmdDrawIndexed(*m_current_command_buffer, upload_info.vertex_draw_count, draw_call.pass_count(), 0, 0, 0);
 		}
 		else if (rsx::method_registers.current_draw_clause.is_single_draw())
 		{
+			if (m_infamous2_vk_candidate) record_infamous2_capture_vk_draw(sub_index, upload_info.vertex_draw_count, true, 1, 0, 1, "vkCmdDrawIndexed");
 			vkCmdDrawIndexed(*m_current_command_buffer, upload_info.vertex_draw_count, 1, 0, 0, 0);
 		}
 		else if (m_device->get_multidraw_support())
@@ -1237,6 +1553,7 @@ void VKGSRender::emit_geometry(u32 sub_index)
 				_ptr++;
 				vertex_offset += count;
 			}
+			if (m_infamous2_vk_candidate) record_infamous2_capture_vk_draw(sub_index, upload_info.vertex_draw_count, true, 1, 0, subranges_count, "vkCmdDrawMultiIndexedEXT");
 			_vkCmdDrawMultiIndexedEXT(*m_current_command_buffer, subranges_count, base_ptr, 1, 0, sizeof(VkMultiDrawIndexedInfoEXT), nullptr);
 		}
 		else
@@ -1246,6 +1563,7 @@ void VKGSRender::emit_geometry(u32 sub_index)
 			for (const auto& range : subranges)
 			{
 				const auto count = get_index_count(draw_call.primitive, range.count);
+				if (m_infamous2_vk_candidate) record_infamous2_capture_vk_draw(sub_index, count, true, 1, vertex_offset, 1, "vkCmdDrawIndexed");
 				vkCmdDrawIndexed(*m_current_command_buffer, count, 1, vertex_offset, 0, 0);
 				vertex_offset += count;
 			}
@@ -1280,8 +1598,29 @@ void VKGSRender::begin()
 
 void VKGSRender::end()
 {
+	m_infamous2_vk_candidate = infamous2_capture_vk_candidate();
+	if (m_infamous2_vk_candidate)
+	{
+		m_infamous2_vk_binding_attempt = 0;
+		m_infamous2_vk_emitted_groups = 0;
+		m_infamous2_vk_emitted_commands = 0;
+		const auto& r = rsx::method_registers;
+		const auto [fp_offset, fp_location] = r.shader_program_address();
+		record_infamous2_capture_vk("batch_enter", fmt::format("\"filter\":\"state_candidate_v1\",\"surface_clip\":[%u,%u,%u,%u],"
+			"\"blend_mask\":%u,\"depth_test\":%u,\"depth_write\":%u,\"fp_offset\":%u,\"fp_location\":%u,"
+			"\"primitive\":%u,\"draw_command\":%u,\"program_state_is_current\":0,\"correlation\":\"backend_clause_hint\"",
+			r.surface_clip_origin_x(), r.surface_clip_origin_y(), r.surface_clip_width(), r.surface_clip_height(), r.blend_enabled_mask(),
+			static_cast<u32>(r.depth_test_enabled()), static_cast<u32>(r.depth_write_enabled()), fp_offset, fp_location,
+			static_cast<u32>(r.current_draw_clause.primitive), static_cast<u32>(r.current_draw_clause.command)));
+	}
 	if (should_skip_draw())
 	{
+		if (m_infamous2_vk_candidate)
+		{
+			record_infamous2_capture_vk("skip", fmt::format("\"reason\":\"should_skip_draw\",\"skip_frame\":%u,\"rtt_valid\":%u,\"no_attachments\":%u,\"conditional_disabled\":%u",
+				static_cast<u32>(skip_current_frame), static_cast<u32>(m_graphics_state.test(rsx::rtt_config_valid)),
+				static_cast<u32>(m_graphics_state.test(rsx::rtt_config_no_attachments)), static_cast<u32>(cond_render_ctrl.disable_rendering())));
+		}
 		execute_nop_draw();
 		rsx::thread::end();
 		return;
@@ -1316,6 +1655,10 @@ void VKGSRender::end()
 	if (!load_program())
 	{
 		// Program is not ready, skip drawing this
+		if (m_infamous2_vk_candidate)
+		{
+			record_infamous2_capture_vk("skip", "\"reason\":\"program_not_ready\"");
+		}
 		std::this_thread::yield();
 		execute_nop_draw();
 		// m_rtts.on_write(); - breaks games for obvious reasons
@@ -1360,6 +1703,7 @@ void VKGSRender::end()
 	// Now bind the shader resources. It is important that this takes place after the barriers so that we don't end up with stale descriptors
 	for (int retry = 0; retry < 3; ++retry)
 	{
+		if (m_infamous2_vk_candidate) m_infamous2_vk_binding_attempt = static_cast<u32>(retry);
 		if (retry > 0 && m_samplers_dirty) [[ unlikely ]]
 		{
 			// Reload texture env if referenced objects were invalidated during OOM handling.
@@ -1380,6 +1724,10 @@ void VKGSRender::end()
 		if (!out_of_memory)
 		{
 			break;
+		}
+		if (m_infamous2_vk_candidate)
+		{
+			record_infamous2_capture_vk("texture_retry", fmt::format("\"binding_attempt\":%u,\"reason\":\"out_of_memory\"", m_infamous2_vk_binding_attempt));
 		}
 
 		// Handle OOM
@@ -1422,6 +1770,12 @@ void VKGSRender::end()
 	}
 
 	m_rtts.on_write(m_framebuffer_layout.color_write_enabled, m_framebuffer_layout.zeta_write_enabled);
+	if (m_infamous2_vk_candidate)
+	{
+		record_infamous2_capture_vk("batch_complete", fmt::format("\"emitted_geometry_groups\":%u,\"recorded_vk_commands\":%u,\"last_binding_attempt\":%u,"
+			"\"gpu_execution_confirmed\":0,\"logical_merge_mapping_available\":0",
+			m_infamous2_vk_emitted_groups, m_infamous2_vk_emitted_commands, m_infamous2_vk_binding_attempt));
+	}
 
 	rsx::thread::end();
 }

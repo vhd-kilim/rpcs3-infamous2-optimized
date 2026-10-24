@@ -330,6 +330,10 @@ public:
 	// Returns a core affinity mask. Set whether to generate the high priority set or not
 	static u64 get_affinity_mask(thread_class group);
 
+	// Experimental hybrid-CPU policy (RPCS3_HYBRID_AFFINITY=1, Windows, non-OS scheduler):
+	// the RSX thread gets one whole P-core (both SMT siblings), everything else the remaining cores.
+	static bool hybrid_affinity_enabled();
+
 	// Sets the native thread priority
 	static void set_native_priority(int priority);
 

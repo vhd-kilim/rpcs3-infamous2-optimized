@@ -7,13 +7,31 @@
 #include "shared.h"
 
 #include "Emu/Cell/timers.hpp"
+#include "Emu/RSX/RSXDiagnostics.h"
+#include "Emu/RSX/RSXThread.h"
 
 #include "util/sysinfo.hpp"
 #include "util/asm.hpp"
 #include "util/logs.hpp"
 
+#include <optional>
+
 namespace vk
 {
+	namespace
+	{
+		bool diagnostics_on_rsx_thread()
+		{
+			if (!rsx::diagnostics::enabled())
+			{
+				return false;
+			}
+
+			const auto* renderer = rsx::get_current_renderer();
+			return renderer && renderer->is_current_thread();
+		}
+	}
+
 	namespace globals
 	{
 		static std::unique_ptr<gpu_debug_marker_pool> g_gpu_debug_marker_pool;
@@ -178,6 +196,9 @@ namespace vk
 
 	void fence::wait_flush()
 	{
+		rsx::diagnostics::scope diagnostic_wait(rsx::diagnostics::bucket::gpu_submit_wait,
+			diagnostics_on_rsx_thread() && !flushed);
+
 		while (!flushed)
 		{
 			utils::pause();
@@ -563,18 +584,27 @@ namespace vk
 	VkResult wait_for_fence(fence* pFence, u64 timeout)
 	{
 		pFence->wait_flush();
+		const bool diagnostic_active = diagnostics_on_rsx_thread();
 
 		if (timeout)
 		{
+			rsx::diagnostics::scope diagnostic_wait(rsx::diagnostics::bucket::gpu_fence_wait, diagnostic_active);
 			return vkWaitForFences(*g_render_device, 1, &pFence->handle, VK_FALSE, timeout * 1000ull);
 		}
 		else
 		{
+			std::optional<rsx::diagnostics::scope> diagnostic_wait;
+
 			while (auto status = vkGetFenceStatus(*g_render_device, pFence->handle))
 			{
 				switch (status)
 				{
 				case VK_NOT_READY:
+					if (diagnostic_active && !diagnostic_wait)
+					{
+						diagnostic_wait.emplace(rsx::diagnostics::bucket::gpu_fence_wait);
+					}
+
 					utils::pause();
 					continue;
 				default:
