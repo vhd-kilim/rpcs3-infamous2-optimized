@@ -2,6 +2,8 @@
 
 Fontes dos coletores e analisadores usados neste projeto. Os scripts PowerShell sao snapshots do laboratorio Windows e possuem caminhos locais, hashes de builds e dependencias declaradas no inicio. Ajuste-os para seu ambiente antes de executar; eles nao sao um instalador universal.
 
+`Jogar-Infamous2-Otimizado.ps1` e o lancador local da ultima build testada: Turbo v3 + busca direta de views, com espera por notificacao desligada e backup verificado antes de abrir. O lancador anterior da v3 foi preservado no laboratorio para comparacoes.
+
 ## Fluxo
 
 1. Fechar o RPCS3 e executar `Backup-Rpcs3Saves.ps1` com destino novo. Ele valida hashes e recusa links de diretorio ou substituicao de backup.
