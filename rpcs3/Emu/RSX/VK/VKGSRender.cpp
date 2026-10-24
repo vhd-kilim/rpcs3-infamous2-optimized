@@ -24,6 +24,7 @@
 #include "../Program/SPIRVCommon.h"
 
 #include "util/asm.hpp"
+#include <cstdlib>
 #include <vulkan/vulkan_core.h>
 
 namespace vk
@@ -1263,6 +1264,26 @@ void VKGSRender::bind_viewport()
 
 void VKGSRender::on_init_thread()
 {
+	// Experimental inFAMOUS 2 path: park the RSX while fault-handler producers
+	// finish a serviced flush, retaining the queue mutex and completion condition.
+#ifdef _MSC_VER
+	char flush_wait_setting[2]{};
+	std::size_t flush_wait_length = 0;
+	const bool flush_wait_requested =
+		getenv_s(&flush_wait_length, flush_wait_setting, sizeof(flush_wait_setting), "RPCS3_INFAMOUS2_RSX_FLUSH_WAIT") == 0 &&
+		flush_wait_length == 2 && flush_wait_setting[0] == '1';
+#else
+	const char* flush_wait_setting = std::getenv("RPCS3_INFAMOUS2_RSX_FLUSH_WAIT");
+	const bool flush_wait_requested = flush_wait_setting && flush_wait_setting[0] == '1' && flush_wait_setting[1] == '\0';
+#endif
+	m_flush_requests.use_completion_notification = flush_wait_requested &&
+		Emu.GetTitleID() == "BCUS98125" && Emu.GetAppVersion() == "01.04" &&
+		Emu.GetExecutableHash() == "PPU-41a7d047c573c78c0307506c9d1b52d15a66e4f5";
+	if (m_flush_requests.use_completion_notification)
+	{
+		rsx_log.notice("INFAMOUS2_RSX_FLUSH_WAIT: completion notifications enabled (64-spin hand-off)");
+	}
+
 	if (m_device == VK_NULL_HANDLE)
 	{
 		fmt::throw_exception("No Vulkan device was created");

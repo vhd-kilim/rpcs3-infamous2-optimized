@@ -703,6 +703,7 @@
     <ClInclude Include="Emu\RSX\Common\profiling_timer.hpp" />
     <ClInclude Include="Emu\RSX\Common\ranged_map.hpp" />
     <ClInclude Include="Emu\RSX\Common\simple_array.hpp" />
+    <ClInclude Include="Emu\RSX\Common\notification_wait.hpp" />
     <ClInclude Include="Emu\RSX\Common\surface_cache_dma.hpp" />
     <ClInclude Include="Emu\RSX\Common\time.hpp" />
     <ClInclude Include="Emu\RSX\Common\unordered_map.hpp" />

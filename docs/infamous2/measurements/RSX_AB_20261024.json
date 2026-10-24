@@ -1,0 +1,575 @@
+[
+  {
+    "variant": "turbo3",
+    "sha256": "A2CCEA61152D8F16C4DE55E1F187FBE774BD61BE28768DC79434717C8C7AF727",
+    "window": {
+      "start": "2026-10-24T16:54:02.078060-03:00",
+      "end": "2026-10-24T16:55:32.078060-03:00",
+      "skip_head_s": 3
+    },
+    "frames": {
+      "intervals": 3113,
+      "covered_seconds": 87.02,
+      "fps_mean": 35.77,
+      "one_percent_low_fps": 23.71,
+      "p50_ms": 27.42,
+      "p99_ms": 38.71,
+      "p999_ms": 47.36,
+      "max_ms": 52.68,
+      "over_50ms": 1,
+      "gpu_active_mean_ms": 9.42
+    },
+    "thread_cpu": {
+      "rsx::thread": 92.79,
+      "SPU[0x0000200] CellSpursKernel0": 85.79,
+      "SPU[0x0000100] CellSpursKernel0": 81.05,
+      "SPU[0x4000100] CellSpursKernel4": 80.87,
+      "SPU[0x1000100] CellSpursKernel1": 80.84,
+      "SPU[0x3000100] CellSpursKernel3": 80.77,
+      "SPU[0x2000100] CellSpursKernel2": 80.49,
+      "PPU[0x1000000] main_thread": 44.06,
+      "RSX Offloader": 28.7,
+      "PPU[0x1000016] AK::EventManager": 6.15,
+      "SPU[0x0000300] RADT5": 2.0,
+      "PPU[0x1000009] SPU Light Task Kicker": 1.87,
+      "21184": 1.33,
+      "Pad Thread": 1.13
+    },
+    "semaphore_wait_pct": 18.56,
+    "native_self": [
+      {
+        "function": "rsx::nv406e::semaphore_acquire",
+        "samples": 16051,
+        "percent": 19.7626
+      },
+      {
+        "function": "[outside EXE: [kernel or untracked]]",
+        "samples": 11219,
+        "percent": 13.8133
+      },
+      {
+        "function": "[outside EXE: amdvlk64.dll]",
+        "samples": 5684,
+        "percent": 6.99836
+      },
+      {
+        "function": "VKGSRender::do_local_task",
+        "samples": 4597,
+        "percent": 5.66001
+      },
+      {
+        "function": "rsx::FIFO::FIFO_control::fetch_u32",
+        "samples": 3517,
+        "percent": 4.33027
+      },
+      {
+        "function": "[outside EXE: ntdll.dll]",
+        "samples": 3276,
+        "percent": 4.03354
+      },
+      {
+        "function": "rsx::thread::end",
+        "samples": 2831,
+        "percent": 3.48564
+      },
+      {
+        "function": "rsx::thread::run_FIFO",
+        "samples": 2709,
+        "percent": 3.33543
+      },
+      {
+        "function": "vk::viewable_image::get_view",
+        "samples": 1379,
+        "percent": 1.69788
+      },
+      {
+        "function": "memcpy",
+        "samples": 1286,
+        "percent": 1.58337
+      },
+      {
+        "function": "rsx::FIFO::FIFO_control::read",
+        "samples": 1233,
+        "percent": 1.51812
+      },
+      {
+        "function": "rsx::dma_manager::sync",
+        "samples": 971,
+        "percent": 1.19553
+      },
+      {
+        "function": "rsx::texture_cache<vk::texture_cache,vk::texture_cache_traits>::fast_texture_search<vk::surface_cache>",
+        "samples": 926,
+        "percent": 1.14013
+      },
+      {
+        "function": "vk::glsl::program::bind_uniform",
+        "samples": 819,
+        "percent": 1.00838
+      },
+      {
+        "function": "VKGSRender::load_texture_env",
+        "samples": 818,
+        "percent": 1.00715
+      },
+      {
+        "function": "rsx::draw_command_processor::analyse_inputs_interleaved",
+        "samples": 803,
+        "percent": 0.988685
+      },
+      {
+        "function": "program_hash_util::fragment_program_compare::operator()",
+        "samples": 728,
+        "percent": 0.896342
+      },
+      {
+        "function": "rsx::rsx_state::decode",
+        "samples": 726,
+        "percent": 0.89388
+      },
+      {
+        "function": "program_hash_util::fragment_program_storage_hash::operator()",
+        "samples": 673,
+        "percent": 0.828624
+      },
+      {
+        "function": "rsx::draw_command_processor::fill_vertex_layout_state",
+        "samples": 525,
+        "percent": 0.6464
+      },
+      {
+        "function": "VKGSRender::end",
+        "samples": 514,
+        "percent": 0.632857
+      },
+      {
+        "function": "rsx::thread::on_task",
+        "samples": 472,
+        "percent": 0.581145
+      },
+      {
+        "function": "rsx::texture_cache<vk::texture_cache,vk::texture_cache_traits>::upload_texture<rsx::fragment_texture,vk::surface_cache>",
+        "samples": 458,
+        "percent": 0.563907
+      },
+      {
+        "function": "vk::fence::wait_flush",
+        "samples": 433,
+        "percent": 0.533126
+      },
+      {
+        "function": "VKGSRender::emit_geometry",
+        "samples": 430,
+        "percent": 0.529433
+      },
+      {
+        "function": "ankerl::unordered_dense::v4_5_0::detail::table<VkCommandBuffer_T *,vk::active_renderpass_info_t,ankerl::unordered_dense::v4_5_0::hash<VkCommandBuffer_T *,void>,std::equal_to<VkCommandBuffer_T *>,std::allocator<std::pair<VkCommandBuffer_T *,vk::active_renderpass_info_t> >,ankerl::unordered_dense::v4_5_0::bucket_type::standard,ankerl::unordered_dense::v4_5_0::detail::default_container_t,0>::do_try_emplace<VkCommandBuffer_T *>",
+        "samples": 428,
+        "percent": 0.52697
+      },
+      {
+        "function": "VKGSRender::upload_vertex_data",
+        "samples": 407,
+        "percent": 0.501114
+      },
+      {
+        "function": "rsx::vertex_cache::weak_vertex_cache::find_vertex_range",
+        "samples": 384,
+        "percent": 0.472796
+      },
+      {
+        "function": "[outside EXE: vulkan-1.dll]",
+        "samples": 362,
+        "percent": 0.445709
+      },
+      {
+        "function": "rsx::interleaved_range_info::calculate_required_range",
+        "samples": 356,
+        "percent": 0.438321
+      }
+    ],
+    "capture_notes": "Manual route; one run per variant; WPR and RSX diagnostics active; self IP samples, not inclusive call stacks."
+  },
+  {
+    "variant": "rsxwait",
+    "sha256": "898B32E7EE923AF6B24F6708CD6CC67B23585B97D2ED79E1BBEC8ECCCDD6775B",
+    "window": {
+      "start": "2026-10-24T17:17:41.896141-03:00",
+      "end": "2026-10-24T17:19:11.896141-03:00",
+      "skip_head_s": 3
+    },
+    "frames": {
+      "intervals": 3020,
+      "covered_seconds": 87.01,
+      "fps_mean": 34.71,
+      "one_percent_low_fps": 23.02,
+      "p50_ms": 28.41,
+      "p99_ms": 39.26,
+      "p999_ms": 47.84,
+      "max_ms": 61.24,
+      "over_50ms": 2,
+      "gpu_active_mean_ms": 8.98
+    },
+    "thread_cpu": {
+      "rsx::thread": 88.57,
+      "SPU[0x0000200] CellSpursKernel0": 86.63,
+      "SPU[0x4000100] CellSpursKernel4": 83.37,
+      "SPU[0x2000100] CellSpursKernel2": 83.29,
+      "SPU[0x0000100] CellSpursKernel0": 83.07,
+      "SPU[0x1000100] CellSpursKernel1": 83.04,
+      "SPU[0x3000100] CellSpursKernel3": 82.86,
+      "PPU[0x1000000] main_thread": 43.01,
+      "RSX Offloader": 26.89,
+      "PPU[0x1000016] AK::EventManager": 7.08,
+      "SPU[0x0000300] RADT5": 3.91,
+      "PPU[0x1000009] SPU Light Task Kicker": 1.46,
+      "28840": 1.06,
+      "Pad Thread": 0.9
+    },
+    "semaphore_wait_pct": 20.7,
+    "native_self": [
+      {
+        "function": "rsx::nv406e::semaphore_acquire",
+        "samples": 17617,
+        "percent": 22.8771
+      },
+      {
+        "function": "[outside EXE: [kernel or untracked]]",
+        "samples": 11159,
+        "percent": 14.4909
+      },
+      {
+        "function": "[outside EXE: amdvlk64.dll]",
+        "samples": 5223,
+        "percent": 6.7825
+      },
+      {
+        "function": "[outside EXE: ntdll.dll]",
+        "samples": 3549,
+        "percent": 4.60867
+      },
+      {
+        "function": "rsx::FIFO::FIFO_control::fetch_u32",
+        "samples": 3409,
+        "percent": 4.42687
+      },
+      {
+        "function": "rsx::thread::end",
+        "samples": 2758,
+        "percent": 3.58149
+      },
+      {
+        "function": "rsx::thread::run_FIFO",
+        "samples": 2583,
+        "percent": 3.35424
+      },
+      {
+        "function": "rsx::FIFO::FIFO_control::read",
+        "samples": 1374,
+        "percent": 1.78425
+      },
+      {
+        "function": "memcpy",
+        "samples": 1327,
+        "percent": 1.72322
+      },
+      {
+        "function": "vk::viewable_image::get_view",
+        "samples": 1258,
+        "percent": 1.63362
+      },
+      {
+        "function": "rsx::dma_manager::sync",
+        "samples": 978,
+        "percent": 1.27001
+      },
+      {
+        "function": "VKGSRender::load_texture_env",
+        "samples": 833,
+        "percent": 1.08172
+      },
+      {
+        "function": "rsx::texture_cache<vk::texture_cache,vk::texture_cache_traits>::fast_texture_search<vk::surface_cache>",
+        "samples": 787,
+        "percent": 1.02199
+      },
+      {
+        "function": "rsx::draw_command_processor::analyse_inputs_interleaved",
+        "samples": 786,
+        "percent": 1.02069
+      },
+      {
+        "function": "vk::glsl::program::bind_uniform",
+        "samples": 770,
+        "percent": 0.999909
+      },
+      {
+        "function": "program_hash_util::fragment_program_compare::operator()",
+        "samples": 699,
+        "percent": 0.90771
+      },
+      {
+        "function": "rsx::rsx_state::decode",
+        "samples": 637,
+        "percent": 0.827198
+      },
+      {
+        "function": "program_hash_util::fragment_program_storage_hash::operator()",
+        "samples": 628,
+        "percent": 0.81551
+      },
+      {
+        "function": "VKGSRender::end",
+        "samples": 499,
+        "percent": 0.647993
+      },
+      {
+        "function": "rsx::draw_command_processor::fill_vertex_layout_state",
+        "samples": 492,
+        "percent": 0.638903
+      },
+      {
+        "function": "rsx::thread::on_task",
+        "samples": 490,
+        "percent": 0.636306
+      },
+      {
+        "function": "rsx::texture_cache<vk::texture_cache,vk::texture_cache_traits>::upload_texture<rsx::fragment_texture,vk::surface_cache>",
+        "samples": 460,
+        "percent": 0.597348
+      },
+      {
+        "function": "vk::fence::wait_flush",
+        "samples": 429,
+        "percent": 0.557092
+      },
+      {
+        "function": "VKGSRender::emit_geometry",
+        "samples": 421,
+        "percent": 0.546704
+      },
+      {
+        "function": "VKGSRender::upload_vertex_data",
+        "samples": 417,
+        "percent": 0.541509
+      },
+      {
+        "function": "rsx::vertex_cache::weak_vertex_cache::find_vertex_range",
+        "samples": 377,
+        "percent": 0.489566
+      },
+      {
+        "function": "[outside EXE: vulkan-1.dll]",
+        "samples": 361,
+        "percent": 0.468789
+      },
+      {
+        "function": "VKGSRender::load_program_env",
+        "samples": 348,
+        "percent": 0.451907
+      },
+      {
+        "function": "vk::cached_texture_section::get_view",
+        "samples": 348,
+        "percent": 0.451907
+      },
+      {
+        "function": "rsx::util::set_fragment_texture_dirty_bit",
+        "samples": 340,
+        "percent": 0.441518
+      }
+    ],
+    "capture_notes": "Manual route; one run per variant; WPR and RSX diagnostics active; self IP samples, not inclusive call stacks."
+  },
+  {
+    "variant": "viewfast",
+    "sha256": "532E806D413727DB05BC24D648A5B75D2DA15D9B51D2F195B964B56AFE1D9DCA",
+    "window": {
+      "start": "2026-10-24T17:28:36.988165-03:00",
+      "end": "2026-10-24T17:30:06.988165-03:00",
+      "skip_head_s": 3
+    },
+    "frames": {
+      "intervals": 3153,
+      "covered_seconds": 86.99,
+      "fps_mean": 36.25,
+      "one_percent_low_fps": 24.04,
+      "p50_ms": 27.18,
+      "p99_ms": 37.85,
+      "p999_ms": 45.88,
+      "max_ms": 55.79,
+      "over_50ms": 1,
+      "gpu_active_mean_ms": 8.65
+    },
+    "thread_cpu": {
+      "rsx::thread": 92.91,
+      "SPU[0x0000200] CellSpursKernel0": 86.78,
+      "SPU[0x2000100] CellSpursKernel2": 81.81,
+      "SPU[0x3000100] CellSpursKernel3": 81.74,
+      "SPU[0x0000100] CellSpursKernel0": 81.57,
+      "SPU[0x1000100] CellSpursKernel1": 81.29,
+      "SPU[0x4000100] CellSpursKernel4": 81.15,
+      "PPU[0x1000000] main_thread": 42.04,
+      "RSX Offloader": 28.69,
+      "PPU[0x1000016] AK::EventManager": 6.63,
+      "SPU[0x0000300] RADT5": 3.44,
+      "PPU[0x1000009] SPU Light Task Kicker": 2.15,
+      "Pad Thread": 0.95,
+      "25848": 0.69
+    },
+    "semaphore_wait_pct": 18.45,
+    "native_self": [
+      {
+        "function": "rsx::nv406e::semaphore_acquire",
+        "samples": 15740,
+        "percent": 19.3599
+      },
+      {
+        "function": "[outside EXE: [kernel or untracked]]",
+        "samples": 10907,
+        "percent": 13.4154
+      },
+      {
+        "function": "[outside EXE: amdvlk64.dll]",
+        "samples": 5713,
+        "percent": 7.02689
+      },
+      {
+        "function": "vk::flush_request_task::consumer_wait",
+        "samples": 4041,
+        "percent": 4.97036
+      },
+      {
+        "function": "rsx::FIFO::FIFO_control::fetch_u32",
+        "samples": 3620,
+        "percent": 4.45253
+      },
+      {
+        "function": "[outside EXE: ntdll.dll]",
+        "samples": 3200,
+        "percent": 3.93594
+      },
+      {
+        "function": "rsx::thread::end",
+        "samples": 2879,
+        "percent": 3.54112
+      },
+      {
+        "function": "rsx::thread::run_FIFO",
+        "samples": 2868,
+        "percent": 3.52759
+      },
+      {
+        "function": "rsx::FIFO::FIFO_control::read",
+        "samples": 1382,
+        "percent": 1.69984
+      },
+      {
+        "function": "memcpy",
+        "samples": 1341,
+        "percent": 1.64941
+      },
+      {
+        "function": "vk::viewable_image::get_view",
+        "samples": 1115,
+        "percent": 1.37143
+      },
+      {
+        "function": "rsx::dma_manager::sync",
+        "samples": 992,
+        "percent": 1.22014
+      },
+      {
+        "function": "rsx::texture_cache<vk::texture_cache,vk::texture_cache_traits>::fast_texture_search<vk::surface_cache>",
+        "samples": 961,
+        "percent": 1.18201
+      },
+      {
+        "function": "VKGSRender::load_texture_env",
+        "samples": 835,
+        "percent": 1.02704
+      },
+      {
+        "function": "rsx::draw_command_processor::analyse_inputs_interleaved",
+        "samples": 816,
+        "percent": 1.00367
+      },
+      {
+        "function": "vk::glsl::program::bind_uniform",
+        "samples": 784,
+        "percent": 0.964306
+      },
+      {
+        "function": "rsx::rsx_state::decode",
+        "samples": 725,
+        "percent": 0.891737
+      },
+      {
+        "function": "program_hash_util::fragment_program_compare::operator()",
+        "samples": 672,
+        "percent": 0.826548
+      },
+      {
+        "function": "program_hash_util::fragment_program_storage_hash::operator()",
+        "samples": 648,
+        "percent": 0.797028
+      },
+      {
+        "function": "VKGSRender::end",
+        "samples": 612,
+        "percent": 0.752749
+      },
+      {
+        "function": "rsx::draw_command_processor::fill_vertex_layout_state",
+        "samples": 570,
+        "percent": 0.70109
+      },
+      {
+        "function": "rsx::thread::on_task",
+        "samples": 500,
+        "percent": 0.614991
+      },
+      {
+        "function": "rsx::texture_cache<vk::texture_cache,vk::texture_cache_traits>::upload_texture<rsx::fragment_texture,vk::surface_cache>",
+        "samples": 456,
+        "percent": 0.560872
+      },
+      {
+        "function": "VKGSRender::emit_geometry",
+        "samples": 455,
+        "percent": 0.559642
+      },
+      {
+        "function": "VKGSRender::upload_vertex_data",
+        "samples": 437,
+        "percent": 0.537502
+      },
+      {
+        "function": "vk::fence::wait_flush",
+        "samples": 428,
+        "percent": 0.526432
+      },
+      {
+        "function": "rsx::vertex_cache::weak_vertex_cache::find_vertex_range",
+        "samples": 424,
+        "percent": 0.521512
+      },
+      {
+        "function": "VKGSRender::load_program_env",
+        "samples": 401,
+        "percent": 0.493223
+      },
+      {
+        "function": "[outside EXE: vulkan-1.dll]",
+        "samples": 389,
+        "percent": 0.478463
+      },
+      {
+        "function": "__security_check_cookie",
+        "samples": 388,
+        "percent": 0.477233
+      }
+    ],
+    "capture_notes": "Manual route; one run per variant; WPR and RSX diagnostics active; self IP samples, not inclusive call stacks."
+  }
+]

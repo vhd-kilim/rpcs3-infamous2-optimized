@@ -488,7 +488,21 @@ namespace vk
 		}
 
 		const u64 storage_key = remap_encoding | (static_cast<u64>(mask) << 32);
-		auto found = views.find(storage_key);
+		auto found = views.end();
+		if (views.size() == 1)
+		{
+			// A single entry can be checked directly, without hashing/bucket division.
+			// Keep the full key (remap and aspect); no cached pointer survives mutation.
+			const auto only = views.begin();
+			if (only->first == storage_key)
+			{
+				found = only;
+			}
+		}
+		else
+		{
+			found = views.find(storage_key);
+		}
 		if (found != views.end())
 		{
 			ensure(found->second->info.subresourceRange.aspectMask & mask);
