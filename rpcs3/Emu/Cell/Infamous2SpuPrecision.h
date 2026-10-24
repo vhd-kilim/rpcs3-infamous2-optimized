@@ -111,30 +111,34 @@ namespace infamous2::spu_precision
 
 	// Every nonzero program word must equal the module word at the same LS offset.
 	// Zero words are analyser holes and are not used as evidence.
+	inline bool program_matches(const module_range& m, u32 lower_bound, const u32* data, usz words)
+	{
+		if (!words || lower_bound < module_ls_base) return false;
+
+		const u32 offset = lower_bound - module_ls_base;
+		if (offset >= m.size || words * 4 > m.size - offset) return false;
+		if (!vm::check_addr(m.va + offset, vm::page_readable, static_cast<u32>(words * 4))) return false;
+
+		const auto* src = vm::_ptr<const u8>(m.va + offset);
+		usz nonzero = 0;
+
+		for (usz i = 0; i < words; i++)
+		{
+			if (!data[i]) continue;
+			nonzero++;
+			if (std::memcmp(&data[i], src + i * 4, 4) != 0) return false;
+		}
+
+		return nonzero * 2 >= words;
+	}
+
 	inline const module_range* match_module(u32 lower_bound, const u32* data, usz words, std::string_view groups)
 	{
 		if (!words || lower_bound < module_ls_base) return nullptr;
 
 		for (const auto& m : modules)
 		{
-			if (!group_requested(groups, m.group)) continue;
-
-			const u32 offset = lower_bound - module_ls_base;
-			if (offset >= m.size || words * 4 > m.size - offset) continue;
-			if (!vm::check_addr(m.va + offset, vm::page_readable, static_cast<u32>(words * 4))) continue;
-
-			const auto* src = vm::_ptr<const u8>(m.va + offset);
-			usz nonzero = 0;
-			bool same = true;
-
-			for (usz i = 0; i < words; i++)
-			{
-				if (!data[i]) continue;
-				nonzero++;
-				if (std::memcmp(&data[i], src + i * 4, 4) != 0) { same = false; break; }
-			}
-
-			if (same && nonzero * 2 >= words) return &m;
+			if (group_requested(groups, m.group) && program_matches(m, lower_bound, data, words)) return &m;
 		}
 
 		return nullptr;
@@ -151,6 +155,24 @@ namespace infamous2::spu_precision
 		if (ls_addr < module_ls_base || ls_addr - module_ls_base + 16 > m.size) return false;
 		if (!vm::check_addr(m.va + (ls_addr - module_ls_base), vm::page_readable, 16)) return false;
 		std::memcpy(out, vm::_ptr<const u8>(m.va + (ls_addr - module_ls_base)), 16);
+		return true;
+	}
+
+	// LS constant folding is only safe when the module running the program is known: small shared
+	// routines (job prologues, library code) can be identical at the same offset in several modules.
+	// Accept a table only if every catalogued module that matches the program holds the same bytes.
+	inline bool module_bytes_unambiguous(const module_range& primary, u32 lower_bound, const u32* data, usz words, u32 ls_addr, u8 (&out)[16])
+	{
+		if (!module_bytes(primary, ls_addr, out)) return false;
+
+		for (const auto& m : modules)
+		{
+			if (&m == &primary || !program_matches(m, lower_bound, data, words)) continue;
+
+			u8 other[16];
+			if (!module_bytes(m, ls_addr, other) || std::memcmp(other, out, 16) != 0) return false;
+		}
+
 		return true;
 	}
 

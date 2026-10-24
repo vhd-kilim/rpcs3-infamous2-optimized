@@ -1712,7 +1712,10 @@ public:
 		m_lsconst_tables.clear();
 		if (!infamous2::spu_precision::lsconst_groups().empty() && infamous2::spu_precision::identity_matches())
 		{
-			if (const auto m = infamous2::spu_precision::match_module(func.lower_bound, func.data.data(), func.data.size(), infamous2::spu_precision::lsconst_groups()))
+			// Small programs are often shared prologues/library code: the content match cannot tell modules apart.
+			const usz code_words = static_cast<usz>(std::count_if(func.data.begin(), func.data.end(), FN(x != 0)));
+			const auto m = code_words >= 64 ? infamous2::spu_precision::match_module(func.lower_bound, func.data.data(), func.data.size(), infamous2::spu_precision::lsconst_groups()) : nullptr;
+			if (m)
 			{
 				for (usz i = 0; i < func.data.size(); i++)
 				{
@@ -1726,7 +1729,7 @@ public:
 					const u32 target = (func.lower_bound + static_cast<u32>(i * 4) + (op.i16 << 2)) & 0x3fff0;
 					u8 bytes[16];
 					if (std::none_of(m_lsconst_tables.begin(), m_lsconst_tables.end(), FN(x.first == target)) &&
-						infamous2::spu_precision::module_bytes(*m, target, bytes))
+						infamous2::spu_precision::module_bytes_unambiguous(*m, func.lower_bound, func.data.data(), func.data.size(), target, bytes))
 					{
 						m_lsconst_tables.emplace_back(target, v128{});
 						std::memcpy(&m_lsconst_tables.back().second, bytes, 16);
