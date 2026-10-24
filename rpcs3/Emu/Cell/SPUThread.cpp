@@ -24,6 +24,8 @@
 #include "Emu/Cell/timers.hpp"
 
 #include "Emu/RSX/Core/RSXReservationLock.hpp"
+#include "Emu/RSX/RSXLabelDiagnostics.h"
+#include "Emu/Cell/Infamous2SpuPrecision.h"
 
 #include <cmath>
 #include <cfenv>
@@ -2122,6 +2124,80 @@ void spu_thread::push_in_mbox(u32 value)
 	thread_ctrl::wait_for_accurate(g_cfg.core.spu_mmio_delay_enabled ? +g_cfg.core.spu_mmio_delay : 3);
 }
 
+namespace
+{
+	// Diagnostics only (RPCS3_RSX_DIAGNOSTICS=1): inFAMOUS 2 job module loads into LS 0x4000 and
+	// guest writes to the semaphores the RSX waits on (see RSXLabelDiagnostics.h).
+	constexpr u32 infamous2_modules_begin = 0x00813600;
+	constexpr u32 infamous2_modules_end = 0x008DA000;
+
+	void infamous2_label_dma(spu_thread* spu, u32 size, const u8* ls, bool is_get, u32 eal, u32 lsa)
+	{
+		namespace labels = rsx::diagnostics::labels;
+		using infamous2::spu_precision::module_ls_base;
+
+		if (is_get)
+		{
+			if (lsa < module_ls_base || eal < infamous2_modules_begin || eal >= infamous2_modules_end)
+			{
+				return;
+			}
+
+			for (const auto& m : infamous2::spu_precision::modules)
+			{
+				if (eal >= m.va && eal < m.va + m.size && eal - m.va == lsa - module_ls_base)
+				{
+					auto& job = labels::current_job();
+					if (job.module != m.name || lsa == module_ls_base)
+					{
+						job.module = m.name;
+						job.loaded_ns = labels::now_ns();
+						labels::global().job_loaded();
+					}
+					return;
+				}
+			}
+			return;
+		}
+
+		if (!labels::range_has_watched(eal, size))
+		{
+			return;
+		}
+
+		const char* code = infamous2::spu_precision::identity_matches() ? infamous2::spu_precision::identify_ls(ls, spu->pc) : nullptr;
+		labels::spu_write(eal, size, labels::path::dma, spu->pc, code);
+	}
+
+	void infamous2_label_atomic(spu_thread* spu, const spu_mfc_cmd& cmd, rsx::diagnostics::labels::path kind)
+	{
+		namespace labels = rsx::diagnostics::labels;
+
+		const u32 line = cmd.eal & -128;
+		if (!labels::range_has_watched(line, 128))
+		{
+			return;
+		}
+
+		// Only count stores that change a watched word (atomic loops often rewrite the same data).
+		const u8* data = spu->_ptr<u8>(cmd.lsa & 0x3ff80);
+		bool changes = false;
+		for (const u32 address : labels::watched)
+		{
+			if (address - line < 128 && std::memcmp(data + (address - line), vm::base(address), 4) != 0)
+			{
+				changes = true;
+			}
+		}
+
+		if (changes)
+		{
+			const char* code = infamous2::spu_precision::identity_matches() ? infamous2::spu_precision::identify_ls(spu->ls, spu->pc) : nullptr;
+			labels::spu_write(line, 128, kind, spu->pc, code);
+		}
+	}
+}
+
 void spu_thread::do_dma_transfer(spu_thread* _this, const spu_mfc_cmd& args, u8* ls)
 {
 	perf_meter<"DMA"_u32> perf_;
@@ -2130,6 +2206,11 @@ void spu_thread::do_dma_transfer(spu_thread* _this, const spu_mfc_cmd& args, u8*
 
 	u32 eal = args.eal;
 	u32 lsa = args.lsa & 0x3ffff;
+
+	if (_this && rsx::diagnostics::enabled()) [[unlikely]]
+	{
+		infamous2_label_dma(_this, args.size, ls, is_get, eal, lsa);
+	}
 
 	// Keep src point to const
 	u8* dst = nullptr;
@@ -4734,6 +4815,11 @@ bool spu_thread::process_mfc_cmd()
 
 	case MFC_PUTLLC_CMD:
 	{
+		if (rsx::diagnostics::enabled()) [[unlikely]]
+		{
+			infamous2_label_atomic(this, ch_mfc_cmd, rsx::diagnostics::labels::path::putllc);
+		}
+
 		// Avoid logging useless commands if there is no reservation
 		const bool dump = g_cfg.core.mfc_debug && raddr;
 
@@ -4915,6 +5001,11 @@ bool spu_thread::process_mfc_cmd()
 	}
 	case MFC_PUTLLUC_CMD:
 	{
+		if (rsx::diagnostics::enabled()) [[unlikely]]
+		{
+			infamous2_label_atomic(this, ch_mfc_cmd, rsx::diagnostics::labels::path::putlluc);
+		}
+
 		if (g_cfg.core.mfc_debug)
 		{
 			auto& dump = mfc_history[mfc_dump_idx++ % max_mfc_dump_idx];
@@ -4931,6 +5022,11 @@ bool spu_thread::process_mfc_cmd()
 	}
 	case MFC_PUTQLLUC_CMD:
 	{
+		if (rsx::diagnostics::enabled()) [[unlikely]]
+		{
+			infamous2_label_atomic(this, ch_mfc_cmd, rsx::diagnostics::labels::path::putlluc);
+		}
+
 		if (g_cfg.core.mfc_debug)
 		{
 			auto& dump = mfc_history[mfc_dump_idx++ % max_mfc_dump_idx];

@@ -2,6 +2,7 @@
 #include "RSXThread.h"
 #include "RSXDiagnostics.h"
 #include "RSXFlushDiagnostics.h"
+#include "RSXLabelDiagnostics.h"
 
 #include "Capture/rsx_capture.h"
 #include "Common/surface_store.h"
@@ -333,6 +334,38 @@ namespace rsx
 		}
 		flush_text += "]}";
 		perf_log.notice("%s", flush_text);
+
+		// Guest writes to the watched NV406E semaphores in the same window.
+		const auto labels = diagnostics::labels::global().take();
+		std::string label_text = fmt::format("RSX_LABEL {\"wall_us\":%llu,\"flips\":%llu,\"job_loads\":%llu,\"rsx_waits\":[",
+			sample.elapsed_ns / 1000, sample.flips, labels.job_loads);
+		for (std::size_t i = 0; i < diagnostics::labels::watched.size(); i++)
+		{
+			fmt::append(label_text, "%s[%u,%llu,%llu]", i ? "," : "", diagnostics::labels::watched[i], labels.rsx_waits[i], labels.rsx_wait_ns[i] / 1000);
+		}
+		label_text += "],\"site_order\":[\"address\",\"path\",\"job\",\"code\",\"pc\",\"writes\",\"while_waiting\",\"wait_us\",\"max_wait_us\",\"job_us\",\"max_job_us\"],\"sites\":[";
+		bool first_label = true;
+		const auto append_label = [&](const diagnostics::labels::sample& l)
+		{
+			if (!first_label) label_text += ',';
+			first_label = false;
+			fmt::append(label_text, "[%u,%u,\"%s\",\"%s\",%u,%llu,%llu,%llu,%llu,%llu,%llu]",
+				l.address, static_cast<u32>(l.kind), l.job ? l.job : "", l.code ? l.code : "", l.pc,
+				l.writes, l.while_waiting, l.wait_ns / 1000, l.max_wait_ns / 1000, l.job_ns / 1000, l.max_job_ns / 1000);
+		};
+		for (const auto& l : labels.slots)
+		{
+			if (!l.writes) break;
+			append_label(l);
+		}
+		label_text += "],\"overflow\":[";
+		first_label = true;
+		if (labels.overflow.writes)
+		{
+			append_label(labels.overflow);
+		}
+		label_text += "]}";
+		perf_log.notice("%s", label_text);
 	}
 
 	std::function<bool(u32 addr, bool is_writing)> g_access_violation_handler;

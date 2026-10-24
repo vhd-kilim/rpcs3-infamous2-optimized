@@ -4,6 +4,7 @@
 
 #include "Emu/RSX/RSXThread.h"
 #include "Emu/RSX/RSXDiagnostics.h"
+#include "Emu/RSX/RSXLabelDiagnostics.h"
 #include "Emu/system_config.h"
 
 #include "context_accessors.define.h"
@@ -70,6 +71,7 @@ namespace rsx
 			{
 				diagnostics::scope diagnostic_wait(diagnostics::bucket::semaphore_wait, diagnostic_active);
 				diagnostics::semaphore_wait diagnostic_address_wait(addr, diagnostic_active);
+				diagnostics::labels::rsx_wait diagnostic_label_wait(addr, diagnostic_active);
 
 				while (sema != arg)
 				{
