@@ -345,4 +345,5 @@ protected:
 	bool on_access_violation(u32 address, bool is_writing) override;
 	void on_invalidate_memory_range(const utils::address_range32 &range, rsx::invalidation_cause cause) override;
 	void on_semaphore_acquire_wait() override;
+	void on_guest_semaphore_wait_begin() override;
 };

@@ -1214,6 +1214,20 @@ void VKGSRender::infamous2_prefetch_scan()
 	}
 }
 
+void VKGSRender::on_guest_semaphore_wait_begin()
+{
+	// The RSX is about to wait for a guest (SPU/PPU) semaphore: let the GPU run the recorded work
+	// meanwhile. Offloader sync waits also call on_semaphore_acquire_wait() and are not used here.
+	if (m_infamous2_early_submit_draws && m_infamous2_draws_since_submit && !(m_queue_status & flush_queue_state::flushing))
+	{
+		flush_command_queue();
+		if (rsx::diagnostics::enabled())
+		{
+			rsx::diagnostics::flushes::global().early_submitted();
+		}
+	}
+}
+
 void VKGSRender::on_semaphore_acquire_wait()
 {
 	if (m_flush_requests.pending() ||
@@ -1221,16 +1235,6 @@ void VKGSRender::on_semaphore_acquire_wait()
 		(m_queue_status & flush_queue_state::deadlock))
 	{
 		do_local_task(rsx::FIFO::state::lock_wait);
-	}
-
-	if (m_infamous2_early_submit_draws && m_infamous2_draws_since_submit && !(m_queue_status & flush_queue_state::flushing))
-	{
-		// The RSX is about to wait on a guest semaphore: let the GPU run the recorded work meanwhile.
-		flush_command_queue();
-		if (rsx::diagnostics::enabled())
-		{
-			rsx::diagnostics::flushes::global().early_submitted();
-		}
 	}
 
 	if (m_infamous2_prefetch && !(m_queue_status & flush_queue_state::flushing))
@@ -1523,7 +1527,7 @@ void VKGSRender::on_init_thread()
 		m_infamous2_early_submit_draws = static_cast<u32>(std::min<unsigned long long>(std::strtoull(early_submit_value, nullptr, 10), 100000));
 		if (m_infamous2_early_submit_draws)
 		{
-			rsx_log.notice("INFAMOUS2_EARLY_SUBMIT: submit at RT switches after %u draws and before semaphore waits", m_infamous2_early_submit_draws);
+			rsx_log.notice("INFAMOUS2_EARLY_SUBMIT: submit at RT switches after %u draws and before NV406E guest semaphore waits (v2)", m_infamous2_early_submit_draws);
 		}
 	}
 

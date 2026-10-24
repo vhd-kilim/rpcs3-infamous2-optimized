@@ -62,6 +62,8 @@ namespace rsx
 				//RSX(ctx)->flush_fifo();
 			}
 
+			RSX(ctx)->on_guest_semaphore_wait_begin();
+
 			u64 start = get_system_time();
 			u64 last_check_val = start;
 
