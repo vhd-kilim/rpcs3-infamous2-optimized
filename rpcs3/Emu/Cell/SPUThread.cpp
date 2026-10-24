@@ -2128,6 +2128,56 @@ namespace
 {
 	// Diagnostics only (RPCS3_RSX_DIAGNOSTICS=1): inFAMOUS 2 job module loads into LS 0x4000 and
 	// guest writes to the semaphores the RSX waits on (see RSXLabelDiagnostics.h).
+
+	// Job code is not DMA'd from the EBOOT image itself (a copy elsewhere), so a module load is
+	// recognised by content: the 64 bytes that land at LS 0x4000.
+	void infamous2_job_loaded(const u8* code)
+	{
+		namespace labels = rsx::diagnostics::labels;
+
+		const char* name = "?";
+		for (const auto& m : infamous2::spu_precision::modules)
+		{
+			if (vm::check_addr(m.va, vm::page_readable, 64) && std::memcmp(code, vm::base(m.va), 64) == 0)
+			{
+				name = m.name;
+				break;
+			}
+		}
+
+		auto& job = labels::current_job();
+		job.module = name;
+		job.loaded_ns = labels::now_ns();
+		labels::global().job_loaded();
+	}
+
+	// SPURS loads job code with DMA lists, whose fast path copies straight into LS without
+	// do_dma_transfer: compare LS 0x4000 before and after the list instead.
+	class infamous2_list_job_watch
+	{
+	public:
+		explicit infamous2_list_job_watch(const u8* ls) noexcept
+			: m_ls(rsx::diagnostics::enabled() ? ls : nullptr)
+		{
+			if (m_ls) std::memcpy(m_before, m_ls + infamous2::spu_precision::module_ls_base, sizeof(m_before));
+		}
+
+		~infamous2_list_job_watch()
+		{
+			if (m_ls && std::memcmp(m_before, m_ls + infamous2::spu_precision::module_ls_base, sizeof(m_before)) != 0)
+			{
+				infamous2_job_loaded(m_ls + infamous2::spu_precision::module_ls_base);
+			}
+		}
+
+		infamous2_list_job_watch(const infamous2_list_job_watch&) = delete;
+		infamous2_list_job_watch& operator=(const infamous2_list_job_watch&) = delete;
+
+	private:
+		const u8* m_ls;
+		u8 m_before[64]{};
+	};
+
 	void infamous2_label_dma(spu_thread* spu, u32 size, const u8* ls, bool is_get, u32 eal, u32 lsa)
 	{
 		namespace labels = rsx::diagnostics::labels;
@@ -2135,27 +2185,10 @@ namespace
 
 		if (is_get)
 		{
-			// Job code is not DMA'd from the EBOOT image itself (a copy elsewhere), so recognise
-			// a module load by content: the first 64 bytes copied to LS 0x4000.
-			if (lsa != module_ls_base || size < 64 || !vm::check_addr(eal, vm::page_readable, 64))
+			if (lsa == module_ls_base && size >= 64 && vm::check_addr(eal, vm::page_readable, 64))
 			{
-				return;
+				infamous2_job_loaded(static_cast<const u8*>(vm::base(eal)));
 			}
-
-			const char* name = "?";
-			for (const auto& m : infamous2::spu_precision::modules)
-			{
-				if (vm::check_addr(m.va, vm::page_readable, 64) && std::memcmp(vm::base(eal), vm::base(m.va), 64) == 0)
-				{
-					name = m.name;
-					break;
-				}
-			}
-
-			auto& job = labels::current_job();
-			job.module = name;
-			job.loaded_ns = labels::now_ns();
-			labels::global().job_loaded();
 			return;
 		}
 
@@ -3012,6 +3045,7 @@ bool spu_thread::do_list_transfer(spu_mfc_cmd& args)
 	}
 
 	perf_meter<"MFC_LIST"_u64> perf0;
+	infamous2_list_job_watch job_watch(ls);
 
 	// Amount of elements to fetch in one go
 	constexpr u32 fetch_size = 6;
