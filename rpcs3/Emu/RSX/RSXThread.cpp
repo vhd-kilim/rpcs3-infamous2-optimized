@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "RSXThread.h"
+#include "RSXDiagnostics.h"
 
 #include "Capture/rsx_capture.h"
 #include "Common/surface_store.h"
@@ -119,6 +120,174 @@ bool serialize<rsx::rsx_iomap_table>(utils::serial& ar, rsx::rsx_iomap_table& o)
 
 namespace rsx
 {
+	// Bounds the extra log only. Native RRC capture semantics remain unchanged.
+	static constexpr u64 infamous2_capture_record_limit = 100'000;
+	static constexpr u64 infamous2_capture_backend_record_limit = 16'384;
+
+	thread::infamous2_capture_context thread::get_infamous2_capture_context() const
+	{
+		const auto& s = m_infamous2_capture;
+		return {s.active, s.id, s.commands, s.draw_batches, s.active ? frame_capture.replay_commands.size() : 0};
+	}
+
+	bool thread::reserve_infamous2_capture_backend_record(u64& event_index)
+	{
+		if (!m_infamous2_capture.active)
+		{
+			return false;
+		}
+
+		event_index = m_infamous2_capture.backend_events++;
+		if (m_infamous2_capture.backend_records >= infamous2_capture_backend_record_limit)
+		{
+			return false;
+		}
+
+		m_infamous2_capture.backend_records++;
+		return true;
+	}
+
+	void thread::begin_infamous2_capture()
+	{
+		const u64 next_id = m_infamous2_capture.id + 1;
+		m_infamous2_capture = {};
+
+		// Read the environment only when a native capture is explicitly requested.
+		// A replay has no game identity and therefore cannot activate this trace.
+#ifdef _MSC_VER
+		char setting[2]{};
+		std::size_t length = 0;
+		const bool requested = getenv_s(&length, setting, sizeof(setting), "RPCS3_INFAMOUS2_CAPTURE") == 0 &&
+			length == 2 && setting[0] == '1';
+#else
+		const char* setting = std::getenv("RPCS3_INFAMOUS2_CAPTURE");
+		const bool requested = setting && setting[0] == '1' && setting[1] == '\0';
+#endif
+		if (!requested || Emu.GetTitleID() != "BCUS98125" || Emu.GetAppVersion() != "01.04" ||
+			Emu.GetExecutableHash() != "PPU-41a7d047c573c78c0307506c9d1b52d15a66e4f5")
+		{
+			return;
+		}
+
+		m_infamous2_capture.id = next_id;
+		m_infamous2_capture.active = true;
+		perf_log.notice("INFAMOUS2_CAPTURE_BEGIN {\"schema\":1,\"capture_id\":%llu,\"title_id\":\"BCUS98125\","
+			"\"app_version\":\"01.04\",\"ppu_hash\":\"PPU-41a7d047c573c78c0307506c9d1b52d15a66e4f5\","
+			"\"command_unit\":\"fifo_dispatch_event\",\"batch_unit\":\"logical_rsx_draw_batch\","
+			"\"record_limit\":%llu,\"resolution_scale_percent\":%u,\"renderer\":%u,\"msaa_setting\":%u,"
+			"\"write_color_buffers\":%u,\"read_color_buffers\":%u,\"strict_rendering\":%u,\"disable_hardware_blending\":%u,"
+			"\"guest_ppc_pc_available\":0,\"backend_schema\":1,\"backend_record_limit\":%llu,\"min_scalable_dimension\":%u}",
+			m_infamous2_capture.id, infamous2_capture_record_limit, g_cfg.video.resolution_scale_percent.get(),
+			static_cast<u32>(g_cfg.video.renderer.get()), static_cast<u32>(g_cfg.video.antialiasing_level.get()),
+			static_cast<u32>(g_cfg.video.write_color_buffers.get()), static_cast<u32>(g_cfg.video.read_color_buffers.get()),
+			static_cast<u32>(g_cfg.video.strict_rendering_mode.get()), static_cast<u32>(g_cfg.video.disable_hardware_blending.get()),
+			infamous2_capture_backend_record_limit, g_cfg.video.min_scalable_dimension.get());
+	}
+
+	void thread::record_infamous2_capture_command(u32 reg, u32 value, u64 rrc_cursor_before)
+	{
+		const u64 command_index = m_infamous2_capture.commands++;
+		if (m_infamous2_capture.records >= infamous2_capture_record_limit)
+		{
+			return;
+		}
+
+		m_infamous2_capture.records++;
+		const u32 fifo_pos = fifo_ctrl->get_pos();
+		// The cursor can advance by zero or several native replay records.
+		// This is the consumed FIFO word's address, not a PPC instruction PC.
+		perf_log.notice("INFAMOUS2_CAPTURE_CMD {\"capture_id\":%llu,\"command_index\":%llu,"
+			"\"rrc_cursor_before\":%llu,\"reg\":%u,\"value\":%u,\"fifo_pos\":%u,\"fifo_ea\":%u}",
+			m_infamous2_capture.id, command_index, rrc_cursor_before, reg, value, fifo_pos, iomap_table.get_addr(fifo_pos));
+	}
+
+	void thread::record_infamous2_capture_draw_batch(u32 element_count)
+	{
+		const u64 batch_index = m_infamous2_capture.draw_batches++;
+		if (m_infamous2_capture.records >= infamous2_capture_record_limit)
+		{
+			return;
+		}
+
+		m_infamous2_capture.records++;
+		const auto& r = method_registers;
+		const auto [fp_offset, fp_location] = r.shader_program_address();
+		// These are cached decoder metadata, not a new read/hash of shader memory.
+		// A logical RSX batch may be deferred, skipped or merged by the backend.
+		perf_log.notice("INFAMOUS2_CAPTURE_DRAW {\"capture_id\":%llu,\"kind\":\"draw_batch\",\"batch_index\":%llu,"
+			"\"command_count\":%llu,\"rrc_cursor_after\":%llu,\"primitive\":%u,\"elements\":%u,"
+			"\"fp_offset\":%u,\"fp_location\":%u,\"vp_start\":%u,\"cached_fp_ucode_bytes\":%u,\"cached_vp_ucode_bytes\":%u,"
+			"\"cached_fp_texture_mask\":%u,\"surface_target\":%u,\"surface_color_format\":%u,\"surface_depth_format\":%u,\"surface_msaa\":%u,"
+			"\"color_offsets\":[%u,%u,%u,%u],\"color_dmas\":[%u,%u,%u,%u],\"color_pitches\":[%u,%u,%u,%u],"
+			"\"depth_offset\":%u,\"depth_dma\":%u,\"depth_pitch\":%u,"
+			"\"surface_clip\":[%u,%u,%u,%u],\"viewport\":[%u,%u,%u,%u],\"scissor\":[%u,%u,%u,%u],"
+			"\"depth_test\":%u,\"depth_write\":%u,\"blend_mask\":%u}",
+			m_infamous2_capture.id, batch_index, m_infamous2_capture.commands, frame_capture.replay_commands.size(),
+			static_cast<u32>(r.current_draw_clause.primitive), element_count, fp_offset, fp_location, r.transform_program_start(),
+			current_fp_metadata.program_ucode_length, current_vp_metadata.ucode_length, current_fp_metadata.referenced_textures_mask,
+			static_cast<u32>(r.surface_color_target()), static_cast<u32>(r.surface_color()), static_cast<u32>(r.surface_depth_fmt()), static_cast<u32>(r.surface_antialias()),
+			r.surface_offset(0), r.surface_offset(1), r.surface_offset(2), r.surface_offset(3),
+			r.surface_dma(0), r.surface_dma(1), r.surface_dma(2), r.surface_dma(3),
+			r.surface_pitch(0), r.surface_pitch(1), r.surface_pitch(2), r.surface_pitch(3),
+			r.surface_z_offset(), r.surface_z_dma(), r.surface_z_pitch(),
+			r.surface_clip_origin_x(), r.surface_clip_origin_y(), r.surface_clip_width(), r.surface_clip_height(),
+			r.viewport_origin_x(), r.viewport_origin_y(), r.viewport_width(), r.viewport_height(),
+			r.scissor_origin_x(), r.scissor_origin_y(), r.scissor_width(), r.scissor_height(),
+			static_cast<u32>(r.depth_test_enabled()), static_cast<u32>(r.depth_write_enabled()), r.blend_enabled_mask());
+	}
+
+	void thread::end_infamous2_capture(bool rrc_saved, u64 rrc_commands)
+	{
+		if (!m_infamous2_capture.active)
+		{
+			return;
+		}
+
+		const auto& s = m_infamous2_capture;
+		perf_log.notice("INFAMOUS2_CAPTURE_END {\"capture_id\":%llu,\"command_count\":%llu,\"draw_batch_count\":%llu,"
+			"\"records_written\":%llu,\"record_limit\":%llu,\"truncated\":%u,\"rrc_saved\":%u,\"rrc_command_count\":%llu,"
+			"\"backend_events\":%llu,\"backend_records\":%llu,\"backend_record_limit\":%llu,\"backend_truncated\":%u}",
+			s.id, s.commands, s.draw_batches, s.records, infamous2_capture_record_limit,
+			static_cast<u32>(s.commands + s.draw_batches > s.records), static_cast<u32>(rrc_saved), rrc_commands,
+			s.backend_events, s.backend_records, infamous2_capture_backend_record_limit, static_cast<u32>(s.backend_events > s.backend_records));
+		m_infamous2_capture.active = false;
+	}
+
+	static void log_rsx_diagnostics(const diagnostics::snapshot& sample)
+	{
+		const auto& b = sample.bucket_samples;
+		const auto& wake = b[static_cast<std::size_t>(diagnostics::bucket::wake_delay)];
+		const auto& offload = b[static_cast<std::size_t>(diagnostics::bucket::offloader_sync)];
+		const auto& semaphore = b[static_cast<std::size_t>(diagnostics::bucket::semaphore_wait)];
+		const auto& submit = b[static_cast<std::size_t>(diagnostics::bucket::gpu_submit_wait)];
+		const auto& fence = b[static_cast<std::size_t>(diagnostics::bucket::gpu_fence_wait)];
+		std::uint64_t attributed_ns = 0;
+		for (const auto& value : b)
+		{
+			attributed_ns += value.exclusive_ns;
+		}
+		const auto unassigned_ns = sample.elapsed_ns >= attributed_ns ? sample.elapsed_ns - attributed_ns : 0;
+
+		// FIFO states and timed scopes overlap. Only the exclusive scope times
+		// partition these measured waits; the remainder is not "useful work".
+		perf_log.notice("RSX_DIAG {\"wall_us\":%llu,\"flips\":%llu,\"unassigned_us\":%llu,"
+			"\"fifo_us\":[%llu,%llu,%llu,%llu,%llu,%llu],\"fifo_transitions\":[%llu,%llu,%llu,%llu,%llu,%llu],"
+			"\"wake_requested_us\":%llu,\"wake_div2_calls\":%llu,"
+			"\"wake\":[%llu,%llu,%llu],\"offloader\":[%llu,%llu,%llu],\"semaphore\":[%llu,%llu,%llu],"
+			"\"submit\":[%llu,%llu,%llu],\"fence\":[%llu,%llu,%llu]}",
+			sample.elapsed_ns / 1000, sample.flips, unassigned_ns / 1000,
+			sample.fifo_ns[0] / 1000, sample.fifo_ns[1] / 1000, sample.fifo_ns[2] / 1000,
+			sample.fifo_ns[3] / 1000, sample.fifo_ns[4] / 1000, sample.fifo_ns[5] / 1000,
+			sample.fifo_transitions[0], sample.fifo_transitions[1], sample.fifo_transitions[2],
+			sample.fifo_transitions[3], sample.fifo_transitions[4], sample.fifo_transitions[5],
+			sample.wake_requested_us, sample.wake_div2_calls,
+			wake.calls, wake.inclusive_ns / 1000, wake.exclusive_ns / 1000,
+			offload.calls, offload.inclusive_ns / 1000, offload.exclusive_ns / 1000,
+			semaphore.calls, semaphore.inclusive_ns / 1000, semaphore.exclusive_ns / 1000,
+			submit.calls, submit.inclusive_ns / 1000, submit.exclusive_ns / 1000,
+			fence.calls, fence.inclusive_ns / 1000, fence.exclusive_ns / 1000);
+	}
+
 	std::function<bool(u32 addr, bool is_writing)> g_access_violation_handler;
 
 	// TODO: Proper context manager
@@ -991,6 +1160,10 @@ namespace rsx
 		if (capture_current_frame)
 		{
 			const u32 element_count = rsx::method_registers.current_draw_clause.get_elements_count();
+			if (m_infamous2_capture.active)
+			{
+				record_infamous2_capture_draw_batch(element_count);
+			}
 			capture_frame(fmt::format("Draw %s %d", rsx::method_registers.current_draw_clause.primitive, element_count));
 		}
 	}
@@ -1023,6 +1196,7 @@ namespace rsx
 
 	void thread::cpu_task()
 	{
+		diagnostics::reset();
 		while (Emu.IsReady())
 		{
 			Emu.WaitReady();
@@ -1129,6 +1303,7 @@ namespace rsx
 		nv4097::set_render_mode(m_ctx, 0, method_registers.registers[NV4097_SET_RENDER_ENABLE]);
 
 		performance_counters.state = FIFO::state::empty;
+		diagnostics::fifo_state_changed(static_cast<unsigned>(FIFO::state::empty));
 
 		const u64 event_flags = unsent_gcm_events.exchange(0);
 
@@ -1158,6 +1333,7 @@ namespace rsx
 		}
 
 		performance_counters.state = FIFO::state::running;
+		diagnostics::fifo_state_changed(static_cast<unsigned>(FIFO::state::running));
 
 		fifo_ctrl = std::make_unique<::rsx::FIFO::FIFO_control>(this);
 		fifo_ctrl->set_get(ctrl->get);
@@ -1288,7 +1464,9 @@ namespace rsx
 			// Wait for external pause events
 			if (external_interrupt_lock)
 			{
+				diagnostics::fifo_state_changed(static_cast<unsigned>(FIFO::state::paused));
 				wait_pause();
+				diagnostics::fifo_state_changed(static_cast<unsigned>(performance_counters.state));
 
 				if (!rsx_thread_running)
 				{
@@ -1328,6 +1506,8 @@ namespace rsx
 
 	void thread::on_exit()
 	{
+		end_infamous2_capture(false, frame_capture.replay_commands.size());
+		diagnostics::flush(log_rsx_diagnostics);
 		if (zcull_ctrl)
 		{
 			zcull_ctrl->sync(this);
@@ -3123,6 +3303,8 @@ namespace rsx
 
 		// Some cases do not need full delay
 		remaining = utils::aligned_div(remaining, div);
+		diagnostics::scope wake_measure{diagnostics::bucket::wake_delay};
+		diagnostics::requested_wake_delay(remaining, div);
 		const u64 until = get_system_time() + remaining;
 
 		while (true)
@@ -3467,6 +3649,7 @@ namespace rsx
 			capture_current_frame = true;
 			frame_debug.reset();
 			frame_capture.reset();
+			begin_infamous2_capture();
 
 			// random number just to jumpstart the size
 			frame_capture.replay_commands.reserve(8000);
@@ -3480,6 +3663,7 @@ namespace rsx
 		else if (capture_current_frame)
 		{
 			capture_current_frame = false;
+			const u64 rrc_commands = frame_capture.replay_commands.size();
 
 			const std::string file_path = fs::get_config_dir() + "captures/" + (Emu.GetTitleID().empty() ? Emu.GetTitle() : Emu.GetTitleID()) + "_" + date_time::current_time_narrow() + "_capture.rrc.gz";
 
@@ -3509,6 +3693,8 @@ namespace rsx
 			{
 				rsx_log.fatal("Capture failed: %s (%s)", file_path, fs::g_tls_error);
 			}
+
+			end_infamous2_capture(pause_emulator, rrc_commands);
 		}
 
 		if (zcull_ctrl->has_pending())
@@ -3567,6 +3753,13 @@ namespace rsx
 		// Reset current stats
 		m_frame_stats = {};
 		m_profiler.enabled = !!g_cfg.video.debug_overlay;
+
+		// One coarse tick per guest frame, never a clock read per RSX command.
+		if (diagnostics::enabled() && is_current_thread())
+		{
+			diagnostics::flip();
+			diagnostics::tick(log_rsx_diagnostics);
+		}
 	}
 
 	f64 thread::get_cached_display_refresh_rate()

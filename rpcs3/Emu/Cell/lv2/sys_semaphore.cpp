@@ -5,6 +5,7 @@
 
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/PPUThread.h"
+#include "Emu/Cell/Infamous2LightProfile.h"
 
 #include "util/asm.hpp"
 
@@ -115,6 +116,7 @@ error_code sys_semaphore_destroy(ppu_thread& ppu, u32 sem_id)
 
 error_code sys_semaphore_wait(ppu_thread& ppu, u32 sem_id, u64 timeout)
 {
+	const infamous2::light_profile::wait_scope light_wait{ppu, infamous2::light_profile::wait_kind::semaphore};
 	ppu.state += cpu_flag::wait;
 
 	sys_semaphore.trace("sys_semaphore_wait(sem_id=0x%x, timeout=0x%llx)", sem_id, timeout);

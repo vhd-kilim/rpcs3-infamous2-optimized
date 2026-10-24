@@ -4,6 +4,7 @@
 #include "Emu/IdManager.h"
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/PPUThread.h"
+#include "Emu/Cell/Infamous2LightProfile.h"
 #include "Emu/Cell/timers.hpp"
 
 #include "util/asm.hpp"
@@ -449,6 +450,7 @@ error_code sys_timer_sleep(ppu_thread& ppu, u32 sleep_time)
 
 error_code sys_timer_usleep(ppu_thread& ppu, u64 sleep_time)
 {
+	const infamous2::light_profile::wait_scope light_wait{ppu, infamous2::light_profile::wait_kind::usleep, sleep_time};
 	ppu.state += cpu_flag::wait;
 
 	sys_timer.trace("sys_timer_usleep(sleep_time=0x%llx)", sleep_time);

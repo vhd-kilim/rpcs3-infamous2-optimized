@@ -5,10 +5,10 @@
 #include "Core/RSXReservationLock.hpp"
 #include "RSXOffload.h"
 #include "RSXThread.h"
+#include "RSXDiagnostics.h"
 
 #include "Utilities/lockless.h"
 
-#include <thread>
 #include "util/asm.hpp"
 
 namespace rsx
@@ -79,8 +79,10 @@ namespace rsx
 				if (m_enqueued_count.load() == m_processed_count.load())
 				{
 					m_processed_count.notify_all();
-					std::this_thread::yield();
 				}
+
+				// Wait for published work; thread state changes also wake this wait.
+				thread_ctrl::wait_on(m_work_queue);
 			}
 
 			m_processed_count = -1;
@@ -178,6 +180,7 @@ namespace rsx
 				return false;
 			}
 
+			diagnostics::scope sync_measure{diagnostics::bucket::offloader_sync};
 			while (_thr.m_enqueued_count.load() > _thr.m_processed_count.load())
 			{
 				rsxthr->on_semaphore_acquire_wait();

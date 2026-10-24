@@ -3,6 +3,7 @@
 #include "Emu/System.h"
 #include "RSXFIFO.h"
 #include "RSXThread.h"
+#include "RSXDiagnostics.h"
 #include "Capture/rsx_capture.h"
 #include "Core/RSXReservationLock.hpp"
 #include "Emu/Memory/vm_reservation.h"
@@ -736,6 +737,7 @@ namespace rsx
 				{
 					performance_counters.FIFO_idle_timestamp = get_system_time();
 					performance_counters.state = FIFO::state::nop;
+					diagnostics::fifo_state_changed(static_cast<unsigned>(FIFO::state::nop));
 				}
 
 				return;
@@ -746,6 +748,7 @@ namespace rsx
 				{
 					performance_counters.FIFO_idle_timestamp = get_system_time();
 					performance_counters.state = FIFO::state::empty;
+					diagnostics::fifo_state_changed(static_cast<unsigned>(FIFO::state::empty));
 				}
 				else
 				{
@@ -784,6 +787,7 @@ namespace rsx
 					}
 
 					performance_counters.state = FIFO::state::spinning;
+					diagnostics::fifo_state_changed(static_cast<unsigned>(FIFO::state::spinning));
 				}
 				else
 				{
@@ -850,6 +854,7 @@ namespace rsx
 			state != FIFO::state::running)
 		{
 			performance_counters.state = FIFO::state::running;
+			diagnostics::fifo_state_changed(static_cast<unsigned>(FIFO::state::running));
 
 			// Hack: Delay FIFO wake-up according to setting
 			// NOTE: The typical spin setup is a NOP followed by a jump-to-self
@@ -871,6 +876,10 @@ namespace rsx
 				const u32 value = command.value;
 
 				frame_debug.command_queue.emplace_back(reg, value);
+				if (m_infamous2_capture.active)
+				{
+					record_infamous2_capture_command(reg, value, frame_capture.replay_commands.size());
+				}
 
 				if (!(reg == NV406E_SET_REFERENCE || reg == NV406E_SEMAPHORE_RELEASE || reg == NV406E_SEMAPHORE_ACQUIRE))
 				{

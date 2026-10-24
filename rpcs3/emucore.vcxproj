@@ -1052,6 +1052,7 @@
     <ClInclude Include="Emu\RSX\Overlays\overlay_controls.h" />
     <ClInclude Include="Emu\RSX\RSXFIFO.h" />
     <ClInclude Include="Emu\RSX\RSXOffload.h" />
+    <ClInclude Include="Emu\RSX\RSXDiagnostics.h" />
     <ClInclude Include="Emu\RSX\rsx_cache.h" />
     <ClInclude Include="Emu\RSX\rsx_decode.h" />
     <ClInclude Include="Emu\RSX\rsx_vertex_data.h" />

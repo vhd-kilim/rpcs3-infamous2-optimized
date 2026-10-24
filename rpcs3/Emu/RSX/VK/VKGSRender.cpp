@@ -2142,6 +2142,7 @@ void VKGSRender::load_program_env()
 		m_fragment_texture_params_buffer_info = m_fragment_texture_params_ring_info.window<768>(m_texture_parameters_dynamic_offset, 768, gpu_limits.maxUniformBufferRange);
 		m_texture_parameters_dynamic_offset -= m_fragment_texture_params_buffer_info.offset;
 	}
+	record_infamous2_capture_vk_ubo(update_fragment_texture_env);
 
 	if (update_raster_env)
 	{
