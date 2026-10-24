@@ -1223,6 +1223,16 @@ void VKGSRender::on_semaphore_acquire_wait()
 		do_local_task(rsx::FIFO::state::lock_wait);
 	}
 
+	if (m_infamous2_early_submit_draws && m_infamous2_draws_since_submit && !(m_queue_status & flush_queue_state::flushing))
+	{
+		// The RSX is about to wait on a guest semaphore: let the GPU run the recorded work meanwhile.
+		flush_command_queue();
+		if (rsx::diagnostics::enabled())
+		{
+			rsx::diagnostics::flushes::global().early_submitted();
+		}
+	}
+
 	if (m_infamous2_prefetch && !(m_queue_status & flush_queue_state::flushing))
 	{
 		if (m_infamous2_prefetch_scan_needed)
@@ -1495,6 +1505,26 @@ void VKGSRender::on_init_thread()
 	if (m_infamous2_prefetch)
 	{
 		rsx_log.notice("INFAMOUS2_FB_PREFETCH: speculative readback of fault-flushed framebuffer ranges enabled");
+	}
+
+#ifdef _MSC_VER
+	char early_submit_setting[16]{};
+	std::size_t early_submit_length = 0;
+	const char* early_submit_value =
+		getenv_s(&early_submit_length, early_submit_setting, sizeof(early_submit_setting), "RPCS3_INFAMOUS2_EARLY_SUBMIT") == 0 && early_submit_length ?
+		early_submit_setting : nullptr;
+#else
+	const char* early_submit_value = std::getenv("RPCS3_INFAMOUS2_EARLY_SUBMIT");
+#endif
+	if (early_submit_value &&
+		Emu.GetTitleID() == "BCUS98125" && Emu.GetAppVersion() == "01.04" &&
+		Emu.GetExecutableHash() == "PPU-41a7d047c573c78c0307506c9d1b52d15a66e4f5")
+	{
+		m_infamous2_early_submit_draws = static_cast<u32>(std::min<unsigned long long>(std::strtoull(early_submit_value, nullptr, 10), 100000));
+		if (m_infamous2_early_submit_draws)
+		{
+			rsx_log.notice("INFAMOUS2_EARLY_SUBMIT: submit at RT switches after %u draws and before semaphore waits", m_infamous2_early_submit_draws);
+		}
 	}
 
 	if (m_device == VK_NULL_HANDLE)
@@ -2663,6 +2693,7 @@ void VKGSRender::init_buffers(rsx::framebuffer_creation_context context, bool)
 void VKGSRender::close_and_submit_command_buffer(vk::fence* pFence, VkSemaphore wait_semaphore, VkSemaphore signal_semaphore, VkPipelineStageFlags pipeline_stage_flags)
 {
 	ensure(!m_queue_status.test_and_set(flush_queue_state::flushing));
+	m_infamous2_draws_since_submit = 0;
 
 	// Host MM sync before executing anything on the GPU
 	rsx::mm_flush();
@@ -2887,6 +2918,14 @@ void VKGSRender::prepare_rtts(rsx::framebuffer_creation_context context)
 	if (m_current_command_buffer->flags & vk::command_buffer::cb_has_dma_transfer)
 	{
 		flush_command_queue();
+	}
+	else if (m_infamous2_early_submit_draws && m_infamous2_draws_since_submit >= m_infamous2_early_submit_draws)
+	{
+		flush_command_queue();
+		if (rsx::diagnostics::enabled())
+		{
+			rsx::diagnostics::flushes::global().early_submitted();
+		}
 	}
 
 	if (!m_rtts.superseded_surfaces.empty())

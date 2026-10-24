@@ -202,6 +202,12 @@ private:
 	bool m_infamous2_prefetch_scan_needed = false; // RSX thread only
 	bool m_infamous2_prefetch_unsubmitted = false; // RSX thread only
 
+	// Experimental inFAMOUS 2 early submit (RPCS3_INFAMOUS2_EARLY_SUBMIT=<draws>): hand recorded
+	// work to the GPU at RT switches and semaphore waits instead of once per frame, so guest
+	// readbacks do not wait for the whole frame to start rendering. 0 = off. RSX thread only.
+	u32 m_infamous2_early_submit_draws = 0;
+	u32 m_infamous2_draws_since_submit = 0;
+
 	ullong m_last_cond_render_eval_hint = 0;
 
 	// Offloader thread deadlock recovery

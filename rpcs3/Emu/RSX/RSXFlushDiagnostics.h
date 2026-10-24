@@ -82,6 +82,7 @@ namespace rsx::diagnostics::flushes
 		std::uint64_t rsx_max_consumer_wait_ns = 0;
 		std::uint64_t prefetch_copies = 0; // Speculative readbacks queued by the RSX
 		std::uint64_t prefetch_submits = 0; // Early submits of those copies
+		std::uint64_t early_submits = 0; // RPCS3_INFAMOUS2_EARLY_SUBMIT submits
 	};
 
 	class registry
@@ -144,6 +145,12 @@ namespace rsx::diagnostics::flushes
 		{
 			std::lock_guard lock(m_mutex);
 			m_window.prefetch_submits++;
+		}
+
+		void early_submitted() noexcept
+		{
+			std::lock_guard lock(m_mutex);
+			m_window.early_submits++;
 		}
 
 		snapshot take() noexcept

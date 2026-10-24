@@ -1598,6 +1598,7 @@ void VKGSRender::begin()
 
 void VKGSRender::end()
 {
+	m_infamous2_draws_since_submit++;
 	m_infamous2_vk_candidate = infamous2_capture_vk_candidate();
 	if (m_infamous2_vk_candidate)
 	{
