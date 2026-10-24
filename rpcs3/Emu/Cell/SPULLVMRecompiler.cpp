@@ -87,6 +87,19 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 	// XFloat accuracy of the function being compiled (configured value unless overridden per program)
 	xfloat_accuracy m_xfloat = g_cfg.core.spu_xfloat_accuracy;
 
+	// RPCS3_INFAMOUS2_LSCONST: LQR targets inside the matched module's image, folded as constants.
+	// Absolute LS address (for a function based at m_base) and the module's bytes there.
+	std::vector<std::pair<u32, v128>> m_lsconst_tables;
+
+	static void infamous2_lsconst_mismatch(spu_thread* _spu)
+	{
+		static atomic_t<u64> s_count{0};
+		if (const u64 n = ++s_count; n <= 8 || (n & (n - 1)) == 0)
+		{
+			spu_log.error("INFAMOUS2_LSCONST: folded LS table differs at function entry (pc=0x%x, count=%u)", _spu->pc, n);
+		}
+	}
+
 	// Constant opcode bits
 	u32 m_op_const_mask = -1;
 
@@ -1696,6 +1709,37 @@ public:
 
 		m_xfloat = infamous2::spu_precision::select(func.lower_bound, func.data.data(), func.data.size(), g_cfg.core.spu_xfloat_accuracy);
 
+		m_lsconst_tables.clear();
+		if (!infamous2::spu_precision::lsconst_groups().empty() && infamous2::spu_precision::identity_matches())
+		{
+			if (const auto m = infamous2::spu_precision::match_module(func.lower_bound, func.data.data(), func.data.size(), infamous2::spu_precision::lsconst_groups()))
+			{
+				for (usz i = 0; i < func.data.size(); i++)
+				{
+					const spu_opcode_t op{std::bit_cast<be_t<u32>>(func.data[i])};
+					if (!func.data[i] || g_spu_itype.decode(op.opcode) != spu_itype::LQR)
+					{
+						continue;
+					}
+
+					// Same address as LQR() computes for a function based at its entry point.
+					const u32 target = (func.lower_bound + static_cast<u32>(i * 4) + (op.i16 << 2)) & 0x3fff0;
+					u8 bytes[16];
+					if (std::none_of(m_lsconst_tables.begin(), m_lsconst_tables.end(), FN(x.first == target)) &&
+						infamous2::spu_precision::module_bytes(*m, target, bytes))
+					{
+						m_lsconst_tables.emplace_back(target, v128{});
+						std::memcpy(&m_lsconst_tables.back().second, bytes, 16);
+					}
+				}
+
+				if (!m_lsconst_tables.empty())
+				{
+					spu_log.notice("INFAMOUS2_LSCONST: %u LS constants folded for %s (lower_bound=0x%x)", m_lsconst_tables.size(), m->name, func.lower_bound);
+				}
+			}
+		}
+
 		bool add_to_file = false;
 
 		if (auto& cache = g_fxo->get<spu_cache>(); cache && g_cfg.core.spu_cache && !add_loc->cached.exchange(1))
@@ -2518,6 +2562,27 @@ public:
 		m_ir->SetInsertPoint(label_body);
 		const auto pbcount = spu_ptr(&spu_thread::block_counter);
 		m_ir->CreateStore(m_ir->CreateAdd(m_ir->CreateLoad(get_type<u64>(), pbcount), m_ir->getInt64(check_iterations)), pbcount);
+
+		if (!m_lsconst_tables.empty())
+		{
+			// Folded tables are only verified here: report (but do not repair) a differing LS image.
+			llvm::Value* bad = m_ir->getFalse();
+			for (const auto& [addr, bytes] : m_lsconst_tables)
+			{
+				const auto rel = m_ir->CreateAnd(m_ir->CreateAdd(m_base_pc, m_ir->getInt32(addr - m_base)), 0x3fff0);
+				const auto loaded = m_ir->CreateLoad(get_type<u32[4]>(), _ptr(m_lsptr, m_ir->CreateZExt(rel, get_type<u64>())));
+				const auto ne = m_ir->CreateICmpNE(loaded, make_const_vector(bytes, get_type<u32[4]>()));
+				bad = m_ir->CreateOr(bad, m_ir->CreateICmpNE(m_ir->CreateBitCast(ne, m_ir->getIntNTy(4)), m_ir->getIntN(4, 0)));
+			}
+
+			const auto label_bad = BasicBlock::Create(m_context, "", m_function);
+			const auto label_ok = BasicBlock::Create(m_context, "", m_function);
+			m_ir->CreateCondBr(bad, label_bad, label_ok, m_md_unlikely);
+			m_ir->SetInsertPoint(label_bad);
+			call("spu_lsconst_mismatch", &infamous2_lsconst_mismatch, m_thread);
+			m_ir->CreateBr(label_ok);
+			m_ir->SetInsertPoint(label_ok);
+		}
 
 		// Call the entry function chunk
 		const auto entry_chunk = add_function(m_pos);
@@ -4232,6 +4297,7 @@ public:
 		using namespace llvm;
 
 		m_xfloat = g_cfg.core.spu_xfloat_accuracy;
+		m_lsconst_tables.clear();
 
 		m_engine->clearAllGlobalMappings();
 
@@ -9731,6 +9797,28 @@ public:
 
 	void LQR(spu_opcode_t op) //
 	{
+		if (!m_interp_magn && !m_lsconst_tables.empty())
+		{
+			const u32 target = (m_pos + (op.i16 << 2)) & 0x3fff0;
+			for (const auto& [addr, bytes] : m_lsconst_tables)
+			{
+				if (addr == target)
+				{
+					// Registers hold LS quadwords byte-reversed (see make_load_ls).
+					v128 reg;
+					for (u32 i = 0; i < 16; i++)
+					{
+						reg._bytes[i] = bytes._bytes[15 - i];
+					}
+
+					value_t<u8[16]> data;
+					data.value = make_const_vector(reg, get_type<u8[16]>());
+					set_vr(op.rt, data);
+					return;
+				}
+			}
+		}
+
 		value_t<u64> addr;
 		addr.value = m_interp_magn ? m_ir->CreateZExt(m_interp_pc, get_type<u64>()) : get_pc_as_u64(m_pos);
 		addr = eval(((get_imm<u64>(op.i16, false) << 2) + addr) & (m_interp_magn ? 0x3fff0 : ~0xf));

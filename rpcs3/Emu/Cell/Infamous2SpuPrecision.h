@@ -77,19 +77,29 @@ namespace infamous2::spu_precision
 		return false;
 	}
 
+	inline std::string read_groups_env(const char* name)
+	{
+#ifdef _MSC_VER
+		char buffer[64]{};
+		std::size_t length = 0;
+		return getenv_s(&length, buffer, sizeof(buffer), name) == 0 && length ? std::string(buffer) : std::string();
+#else
+		const char* env = std::getenv(name);
+		return std::string(env ? env : "");
+#endif
+	}
+
 	inline const std::string& requested_groups()
 	{
-		static const std::string value = []
-		{
-#ifdef _MSC_VER
-			char buffer[64]{};
-			std::size_t length = 0;
-			return getenv_s(&length, buffer, sizeof(buffer), "RPCS3_INFAMOUS2_RELAXED") == 0 && length ? std::string(buffer) : std::string();
-#else
-			const char* env = std::getenv("RPCS3_INFAMOUS2_RELAXED");
-			return std::string(env ? env : "");
-#endif
-		}();
+		static const std::string value = read_groups_env("RPCS3_INFAMOUS2_RELAXED");
+		return value;
+	}
+
+	// Opt-in LS constant folding (RPCS3_INFAMOUS2_LSCONST=light[,postfx...]): LQR loads that read the
+	// module's own read-only tables compile as constants (SHUFB masks then become native shuffles).
+	inline const std::string& lsconst_groups()
+	{
+		static const std::string value = read_groups_env("RPCS3_INFAMOUS2_LSCONST");
 		return value;
 	}
 
@@ -101,13 +111,13 @@ namespace infamous2::spu_precision
 
 	// Every nonzero program word must equal the module word at the same LS offset.
 	// Zero words are analyser holes and are not used as evidence.
-	inline const module_range* match_module(u32 lower_bound, const u32* data, usz words)
+	inline const module_range* match_module(u32 lower_bound, const u32* data, usz words, std::string_view groups)
 	{
 		if (!words || lower_bound < module_ls_base) return nullptr;
 
 		for (const auto& m : modules)
 		{
-			if (!group_requested(requested_groups(), m.group)) continue;
+			if (!group_requested(groups, m.group)) continue;
 
 			const u32 offset = lower_bound - module_ls_base;
 			if (offset >= m.size || words * 4 > m.size - offset) continue;
@@ -128,6 +138,20 @@ namespace infamous2::spu_precision
 		}
 
 		return nullptr;
+	}
+
+	inline const module_range* match_module(u32 lower_bound, const u32* data, usz words)
+	{
+		return match_module(lower_bound, data, words, requested_groups());
+	}
+
+	// The 16 bytes the module image holds at an LS address (module byte 0 = LS 0x4000).
+	inline bool module_bytes(const module_range& m, u32 ls_addr, u8 (&out)[16])
+	{
+		if (ls_addr < module_ls_base || ls_addr - module_ls_base + 16 > m.size) return false;
+		if (!vm::check_addr(m.va + (ls_addr - module_ls_base), vm::page_readable, 16)) return false;
+		std::memcpy(out, vm::_ptr<const u8>(m.va + (ls_addr - module_ls_base)), 16);
+		return true;
 	}
 
 	// Diagnostics only: name the job module (any group) whose code is in LS around pc.
