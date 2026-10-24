@@ -3648,9 +3648,92 @@ void thread_ctrl::detect_cpu_layout()
 	}
 }
 
+namespace
+{
+	struct hybrid_affinity_masks
+	{
+		u64 rsx = 0;
+		u64 others = 0;
+	};
+
+	// Reserve the highest P-core (both SMT siblings) for the RSX thread. Zero masks mean "not applicable".
+	hybrid_affinity_masks compute_hybrid_affinity_masks(u64 process_mask)
+	{
+		hybrid_affinity_masks result{};
+#ifdef _WIN32
+#ifdef _MSC_VER
+		char setting[2]{};
+		std::size_t length = 0;
+		if (getenv_s(&length, setting, sizeof(setting), "RPCS3_HYBRID_AFFINITY") != 0 || length != 2 || setting[0] != '1')
+			return result;
+#else
+		const char* setting = std::getenv("RPCS3_HYBRID_AFFINITY");
+		if (!setting || setting[0] != '1' || setting[1] != '\0')
+			return result;
+#endif
+		DWORD size = 0;
+		GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &size);
+		if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || !size)
+			return result;
+
+		std::vector<u8> buffer(size);
+		if (!GetLogicalProcessorInformationEx(RelationProcessorCore, reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data()), &size))
+			return result;
+
+		u8 best_class = 0;
+		u64 rsx_mask = 0;
+		bool hybrid = false;
+
+		for (usz offset = 0; offset < size;)
+		{
+			const auto info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data() + offset);
+			const u8 eff = info->Processor.EfficiencyClass;
+			const u64 mask = info->Processor.GroupMask[0].Mask & process_mask;
+
+			if (eff != best_class && offset) hybrid = true;
+
+			// Last core of the highest efficiency class with SMT
+			if (mask && info->Processor.Flags == LTP_PC_SMT && eff >= best_class)
+			{
+				best_class = eff;
+				rsx_mask = mask;
+			}
+
+			offset += info->Size;
+		}
+
+		if (!hybrid || !rsx_mask || !(process_mask & ~rsx_mask))
+			return result;
+
+		result.rsx = rsx_mask;
+		result.others = process_mask & ~rsx_mask;
+		sig_log.notice("Hybrid affinity: RSX mask=0x%x, other threads mask=0x%x", result.rsx, result.others);
+#else
+		(void)process_mask;
+#endif
+		return result;
+	}
+
+	const hybrid_affinity_masks& hybrid_masks()
+	{
+		static const hybrid_affinity_masks masks = compute_hybrid_affinity_masks(thread_ctrl::get_process_affinity_mask());
+		return masks;
+	}
+}
+
+bool thread_ctrl::hybrid_affinity_enabled()
+{
+	return hybrid_masks().rsx != 0;
+}
+
 u64 thread_ctrl::get_affinity_mask(thread_class group)
 {
 	detect_cpu_layout();
+
+	if (const auto& hybrid = hybrid_masks(); hybrid.rsx)
+	{
+		return group == thread_class::rsx ? hybrid.rsx : hybrid.others;
+	}
 
 	if (const auto thread_count = utils::get_thread_count())
 	{

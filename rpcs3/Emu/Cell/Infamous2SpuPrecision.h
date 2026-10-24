@@ -39,7 +39,30 @@ namespace infamous2::spu_precision
 		{"visb", "vis", 0x00828C00, 0x65D0},
 		{"visprogocc", "vis", 0x00823C00, 0x4FB0},
 		{"spudraw", "spudraw", 0x00836300, 0x15B70},
-		// Not listed on purpose: spumesh/edgeanim (Relaxed deforms NPC skinning).
+		// Mesh/skinning: global Relaxed deforms NPC heads; split to find which one does it.
+		{"spumesh", "mesh", 0x00880E00, 0xB6B0},
+		{"edgegeomsort", "mesh", 0x0088C500, 0xAA0},
+		{"edgeanim", "anim", 0x0088D000, 0x1A9A0},
+		// Visual-only effects.
+		{"psysblip", "fx", 0x00813600, 0x7980},
+		{"psysrip", "fx", 0x0081AF80, 0x8C10},
+		{"psysspark", "fx", 0x00831F80, 0x4350},
+		{"psysltg", "fx", 0x0084BE80, 0x5E80},
+		{"psysdivot", "fx", 0x00851D00, 0x1E30},
+		{"fog", "fx", 0x00853B80, 0x2540},
+		{"occlusion", "fx", 0x0085FF00, 0x9A0},
+		{"deepwater", "fx", 0x0086F400, 0x4940},
+		{"dyntexlife", "fx", 0x00873D80, 0x1720},
+		{"forestrender", "fx", 0x008BD880, 0x17A0},
+		{"forestupdate", "fx", 0x008BF080, 0x1320},
+		{"drawblip", "fx", 0x008C0400, 0x6610},
+		{"swoosh", "fx", 0x008C9C00, 0x31B0},
+		// Gameplay-affecting simulation; never enabled by the test packages.
+		{"move", "sim", 0x00860900, 0xEAE0},
+		{"traffic", "sim", 0x00856100, 0x9DD0},
+		{"physclip", "sim", 0x008B7680, 0x61C0},
+		{"pedspn", "sim", 0x008C6A80, 0x3170},
+		{"xpgen", "sim", 0x008A7A00, 0xFC40},
 	};
 
 	inline bool group_requested(std::string_view list, std::string_view group) noexcept

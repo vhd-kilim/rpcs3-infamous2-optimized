@@ -54,7 +54,9 @@ namespace rsx
 
 			if (g_cfg.core.thread_scheduler != thread_scheduler_mode::os)
 			{
-				thread_ctrl::set_thread_affinity_mask(thread_ctrl::get_affinity_mask(thread_class::rsx));
+				// The hybrid policy reserves the RSX core for rsx::thread alone
+				thread_ctrl::set_thread_affinity_mask(thread_ctrl::get_affinity_mask(
+					thread_ctrl::hybrid_affinity_enabled() ? thread_class::general : thread_class::rsx));
 			}
 
 			while (thread_ctrl::state() != thread_state::aborting)
