@@ -28,6 +28,10 @@ notification_wait.exe
 
 O helper e o mesmo incluido pelo renderer. O teste exercita a condicao de conclusao e a corrida load-to-wait com atomicas C++20; o runtime real do RPCS3 e validado separadamente.
 
+## Patch de modelos
+
+`patches/BCUS98125_patch.yml` contem somente **Disable Mesh Trimming**, de Yahfz, para BCUS98125 01.04 e o hash PPU indicado no arquivo. Para outro perfil RPCS3, colocar em sua pasta `patches` e ativar pelo gerenciador de patches. Se ja houver arquivo de patches com esse nome, mesclar pelo gerenciador em vez de substituir. A copia nao altera saves, FOV, audio ou resolucao.
+
 ## Dados
 
 PresentMon e uma dependencia externa, nao incluida. PDBs e binarios sao produzidos pela build local. PerfView nao e necessario para executar o leitor nativo.

@@ -1,0 +1,12 @@
+Version: 1.2
+
+PPU-41a7d047c573c78c0307506c9d1b52d15a66e4f5:
+  "Disable Mesh Trimming":
+    Games:
+      "inFamous 2":
+        BCUS98125: [ "01.04" ]
+    Author: "Yahfz"
+    Notes: "Allows the game to render correctly at higher resolutions than what the PS3 supports."
+    Patch Version: 1.0
+    Patch:
+      - [ be32, 0x008875c0, 0x4020007f ]
