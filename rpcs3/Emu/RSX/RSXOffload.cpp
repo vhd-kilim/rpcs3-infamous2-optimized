@@ -8,6 +8,9 @@
 #include "RSXDiagnostics.h"
 
 #include "Utilities/lockless.h"
+#include "Emu/Cell/timers.hpp"
+
+#include <cstdlib>
 
 #include "util/asm.hpp"
 
@@ -21,6 +24,22 @@ namespace rsx
 		transport_packet* m_current_job = nullptr;
 
 		thread_base* current_thread_ = nullptr;
+
+		static u64 spin_before_wait_us()
+		{
+			static const u64 value = []() -> u64
+			{
+#ifdef _MSC_VER
+				char buffer[16]{};
+				std::size_t length = 0;
+				const char* env = getenv_s(&length, buffer, sizeof(buffer), "RPCS3_OFFLOAD_SPIN_US") == 0 && length ? buffer : nullptr;
+#else
+				const char* env = std::getenv("RPCS3_OFFLOAD_SPIN_US");
+#endif
+				return env ? std::min<u64>(std::strtoull(env, nullptr, 10), 1000) : 0;
+			}();
+			return value;
+		}
 
 		void operator ()()
 		{
@@ -79,6 +98,18 @@ namespace rsx
 				if (m_enqueued_count.load() == m_processed_count.load())
 				{
 					m_processed_count.notify_all();
+				}
+
+				// Optional short spin before sleeping: work published right after the queue drains
+				// is picked up without the wake-up latency (RPCS3_OFFLOAD_SPIN_US, default 0).
+				if (const u64 spin_us = spin_before_wait_us())
+				{
+					const u64 until = get_system_time() + spin_us;
+
+					while (!m_work_queue && get_system_time() < until && thread_ctrl::state() != thread_state::aborting)
+					{
+						utils::pause();
+					}
 				}
 
 				// Wait for published work; thread state changes also wake this wait.
