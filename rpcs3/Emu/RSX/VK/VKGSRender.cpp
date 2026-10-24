@@ -18,6 +18,10 @@
 #include "Emu/RSX/rsx_methods.h"
 #include "Emu/RSX/Host/MM.h"
 #include "Emu/RSX/Host/RSXDMAWriter.h"
+#include "Emu/RSX/RSXFlushDiagnostics.h"
+#include "Emu/Cell/PPUThread.h"
+#include "Emu/Cell/SPUThread.h"
+#include "Emu/Cell/Infamous2SpuPrecision.h"
 #include "Emu/RSX/NV47/HW/context_accessors.define.h"
 #include "Emu/Memory/vm_locking.h"
 
@@ -925,6 +929,68 @@ VKGSRender::~VKGSRender()
 #endif
 }
 
+namespace
+{
+	// Diagnostics only: who caused a texture-cache flush and what it is flushing.
+	void describe_flush_source(rsx::diagnostics::flushes::sample& out, bool is_writing, const vk::texture_cache::thrashed_set& result)
+	{
+		using rsx::diagnostics::flushes::source;
+
+		out.writing = is_writing;
+		rsx::diagnostics::flushes::copy_label(out.thread, thread_ctrl::get_name());
+
+		if (const auto cpu = get_current_cpu_thread())
+		{
+			switch (cpu->get_class())
+			{
+			case thread_class::ppu:
+			{
+				const auto ppu = static_cast<ppu_thread*>(cpu);
+				out.kind = source::ppu;
+				out.pc = ppu->cia;
+				out.lr = static_cast<u32>(ppu->lr);
+				break;
+			}
+			case thread_class::spu:
+			{
+				const auto spu = static_cast<spu_thread*>(cpu);
+				out.kind = source::spu;
+				out.pc = spu->pc;
+				out.lr = spu->gpr[0]._u32[3];
+				if (infamous2::spu_precision::identity_matches())
+				{
+					if (const char* name = infamous2::spu_precision::identify_ls(spu->ls, spu->pc))
+					{
+						rsx::diagnostics::flushes::copy_label(out.module, name);
+					}
+				}
+				break;
+			}
+			case thread_class::rsx:
+				out.kind = source::rsx;
+				break;
+			default:
+				break;
+			}
+		}
+
+		for (const auto* section : result.sections_to_flush)
+		{
+			if (!out.sections)
+			{
+				out.base = section->get_section_base();
+				out.width = section->get_width();
+				out.height = section->get_height();
+				out.format = section->get_gcm_format();
+			}
+
+			out.sections++;
+			out.bytes += section->get_section_size();
+			out.context_mask |= static_cast<u32>(section->get_context());
+		}
+	}
+}
+
 bool VKGSRender::on_access_violation(u32 address, bool is_writing)
 {
 	rsx::mm_flush(address);
@@ -948,6 +1014,14 @@ bool VKGSRender::on_access_violation(u32 address, bool is_writing)
 
 	if (result.num_flushable > 0)
 	{
+		const bool flush_diagnostics = rsx::diagnostics::enabled();
+		rsx::diagnostics::flushes::sample flush_sample{};
+		const auto flush_started = flush_diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+		if (flush_diagnostics)
+		{
+			describe_flush_source(flush_sample, is_writing, result);
+		}
+
 		if (g_fxo->get<rsx::dma_manager>().is_current_thread())
 		{
 			// The offloader thread cannot handle flush requests
@@ -967,6 +1041,12 @@ bool VKGSRender::on_access_violation(u32 address, bool is_writing)
 			}
 
 			g_fxo->get<rsx::dma_manager>().clear_mem_fault_flag();
+			if (flush_diagnostics)
+			{
+				flush_sample.kind = rsx::diagnostics::flushes::source::offloader;
+				flush_sample.service_ns = rsx::diagnostics::flushes::elapsed_ns(flush_started);
+				rsx::diagnostics::flushes::global().record(flush_sample);
+			}
 			return true;
 		}
 
@@ -1007,12 +1087,21 @@ bool VKGSRender::on_access_violation(u32 address, bool is_writing)
 			};
 		}
 
+		const auto transfer_started = flush_diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 		m_texture_cache.flush_all(*m_secondary_cb_list.next(), result, data_transfer_completed_callback);
 
 		if (has_queue_ref)
 		{
 			// Release RSX thread if it's still locked
 			m_flush_requests.remove_one();
+		}
+
+		if (flush_diagnostics)
+		{
+			const auto finished = std::chrono::steady_clock::now();
+			flush_sample.service_ns = rsx::diagnostics::flushes::ns_between(flush_started, transfer_started);
+			flush_sample.transfer_ns = rsx::diagnostics::flushes::ns_between(transfer_started, finished);
+			rsx::diagnostics::flushes::global().record(flush_sample);
 		}
 	}
 
@@ -1802,11 +1891,22 @@ void VKGSRender::do_local_task(rsx::FIFO::state state)
 		{
 			// TODO: Determine if a hard sync is necessary
 			// Pipeline barriers later may do a better job synchronizing than wholly stalling the pipeline
+			const bool flush_diagnostics = rsx::diagnostics::enabled();
+			const auto service_started = flush_diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 			flush_command_queue();
+			const auto wait_started = flush_diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 
 			m_flush_requests.clear_pending_flag();
 			m_flush_requests.consumer_wait();
 			m_flush_queue_mutex.unlock();
+
+			if (flush_diagnostics)
+			{
+				const auto finished = std::chrono::steady_clock::now();
+				rsx::diagnostics::flushes::global().rsx_serviced(
+					rsx::diagnostics::flushes::ns_between(service_started, wait_started),
+					rsx::diagnostics::flushes::ns_between(wait_started, finished));
+			}
 		}
 	}
 	else if (!in_begin_end && state != rsx::FIFO::state::lock_wait)
