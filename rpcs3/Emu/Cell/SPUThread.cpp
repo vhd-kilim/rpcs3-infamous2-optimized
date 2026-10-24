@@ -2128,9 +2128,6 @@ namespace
 {
 	// Diagnostics only (RPCS3_RSX_DIAGNOSTICS=1): inFAMOUS 2 job module loads into LS 0x4000 and
 	// guest writes to the semaphores the RSX waits on (see RSXLabelDiagnostics.h).
-	constexpr u32 infamous2_modules_begin = 0x00813600;
-	constexpr u32 infamous2_modules_end = 0x008DA000;
-
 	void infamous2_label_dma(spu_thread* spu, u32 size, const u8* ls, bool is_get, u32 eal, u32 lsa)
 	{
 		namespace labels = rsx::diagnostics::labels;
@@ -2138,25 +2135,27 @@ namespace
 
 		if (is_get)
 		{
-			if (lsa < module_ls_base || eal < infamous2_modules_begin || eal >= infamous2_modules_end)
+			// Job code is not DMA'd from the EBOOT image itself (a copy elsewhere), so recognise
+			// a module load by content: the first 64 bytes copied to LS 0x4000.
+			if (lsa != module_ls_base || size < 64 || !vm::check_addr(eal, vm::page_readable, 64))
 			{
 				return;
 			}
 
+			const char* name = "?";
 			for (const auto& m : infamous2::spu_precision::modules)
 			{
-				if (eal >= m.va && eal < m.va + m.size && eal - m.va == lsa - module_ls_base)
+				if (vm::check_addr(m.va, vm::page_readable, 64) && std::memcmp(vm::base(eal), vm::base(m.va), 64) == 0)
 				{
-					auto& job = labels::current_job();
-					if (job.module != m.name || lsa == module_ls_base)
-					{
-						job.module = m.name;
-						job.loaded_ns = labels::now_ns();
-						labels::global().job_loaded();
-					}
-					return;
+					name = m.name;
+					break;
 				}
 			}
+
+			auto& job = labels::current_job();
+			job.module = name;
+			job.loaded_ns = labels::now_ns();
+			labels::global().job_loaded();
 			return;
 		}
 
