@@ -472,6 +472,11 @@ namespace rsx
 		virtual void on_semaphore_acquire_wait() {}
 
 		/**
+		 * Called once when an NV406E semaphore acquire has to wait for the guest
+		 */
+		virtual void on_guest_semaphore_wait_begin() {}
+
+		/**
 		 * Load an image from memory with optional scaling and rotation.
 		 * Returns false to tell the HW decoder to perform the operation on the CPU as a fallback when the operation cannot be safely accelerated.
 		 */
