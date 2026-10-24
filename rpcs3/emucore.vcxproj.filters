@@ -2842,6 +2842,9 @@
     <ClInclude Include="Emu\RSX\RSXFlushDiagnostics.h">
       <Filter>Emu\GPU\RSX\Host Mini-Driver</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\RSX\RSXLabelDiagnostics.h">
+      <Filter>Emu\GPU\RSX\Host Mini-Driver</Filter>
+    </ClInclude>
     <ClInclude Include="Emu\RSX\RSXThread.h">
       <Filter>Emu\GPU\RSX\Host Mini-Driver</Filter>
     </ClInclude>
