@@ -1,6 +1,6 @@
 # Documentação técnica — inFAMOUS 2
 
-[Página principal](../../README.md) · [Histórico](CHANGELOG.md) · [Ferramentas](../../tools/infamous2/README.md)
+[Página principal](../../README.md) · [Ferramentas](../../tools/infamous2/README.md)
 
 Alvo validado: **BCUS98125, atualização 01.04**, PPU `41a7d047c573c78c0307506c9d1b52d15a66e4f5`. Revisão: **24/10/2026**.
 
@@ -43,22 +43,18 @@ O teste somente com núcleos P e o Alternative Scheduler pioraram o resultado; a
 
 O [lançador local](../../tools/infamous2/Jogar-Infamous2-Otimizado.ps1) registra a última build testada (v3 + busca de views), sem coletores e com backup de saves. Contém caminhos e hash locais: não é instalador portátil nem substitui a compilação.
 
-## Resultados e evidências
+## Condições da comparação RSX
 
-| Documento | Conteúdo |
-|---|---|
-| [Perfil RSX mais recente](RSX_PROFILE_20261024.md) | WPR/PDB, esperas, notificação e busca de views |
-| [Resumo estruturado RSX](measurements/RSX_AB_20261024.json) | Três variantes com métricas e identificação das builds |
-| [A/B do Offloader](measurements/AB_OFFLOADER_20261024.md) | Quatro rodadas alternadas |
-| [Pacotes Turbo](measurements/TURBO_20261024.md) | Evolução v1–v4 e duas rodadas v3 |
-| [Agendamento](measurements/AB_SCHEDULER_20261024.md) | Alternativas de scheduler e afinidade |
-| [Precisão global e deformação](measurements/AB_XFLOAT_RELAXED_20261024.md) | Problema visual que descartou Relaxed global |
-| [Ferramentas](../../tools/infamous2/README.md) | Coleta, análise, perfil offline, backup e patch |
+O [resumo estruturado](measurements/RSX_AB_20261024.json) contém métricas e identificação das três builds: v3 com patch, espera por notificação e busca de view única. Foram percursos manuais de 90 segundos, com 87 segundos analisados após descarte inicial de 3 segundos. PresentMon, diagnóstico RSX e WPR estavam ativos nos três testes; a espera por notificação ficou desligada na variante de busca de views.
 
-## Registros de pesquisa e colaboração
+| Variante | FPS médio | 1% low | P99 |
+|---|---:|---:|---:|
+| v3 com patch | 35,77 | 23,71 | 38,71 ms |
+| Notificação de flush | 34,71 | 23,02 | 39,26 ms |
+| Busca de view única | 36,25 | 24,04 | 37,85 ms |
 
-- [Leitura do código do jogo](../../RELATORIO_CODIGO_JOGO_PARA_CLAUDE.md): mapa estático e candidatos; não equivale a código-fonte original ou patch de IA validado.
-- [Contexto histórico Codex/Claude](../../CONTEXTO_COMPARTILHADO_CODEX_CLAUDE_RPCS3_INFAMOUS2.md): etapas e caminhos do laboratório. Pode conter planos e estados anteriores.
-- [Histórico resumido](CHANGELOG.md): alterações integradas e questões abertas.
+Uma rodada por variante não separa ganho pequeno de variação de cena. O início por mensagem tem imprecisão; o cache e a presença de profilers também afetam a comparação com outras séries. O 1% low é 1000 dividido pela média do 1% de intervalos mais lentos. Amostras nativas de CPU por função não equivalem à duração de cada chamada.
 
-Para o estado atual, use este índice, os relatórios datados e o código correspondente. ISO, EBOOT/ELF, firmware, saves, PDBs e ETLs completos permanecem fora do repositório.
+Builds Windows Release x64 e testes específicos do helper de espera foram executados. A suíte geral GoogleTest, outras máquinas e uma campanha completa não foram validadas.
+
+Consulte as [ferramentas](../../tools/infamous2/README.md) para coleta, análise, backup e patch. Conversas de assistentes e relatórios internos de trabalho ficam locais, fora da versão publicada. ISO, EBOOT/ELF, firmware, saves, PDBs e ETLs completos também não são distribuídos.

@@ -4,7 +4,7 @@ Fork experimental do [RPCS3](https://github.com/RPCS3/rpcs3) dedicado a melhorar
 
 **Estado em 24/10/2026:** Turbo v3 testada, patch de modelos validado pelo jogador e uma pequena melhoria de busca de views Vulkan em avaliação. Projeto independente da equipe RPCS3. O jogo continua sendo emulado; não há port nativo.
 
-[Documentação técnica](docs/infamous2/README.md) · [Resultados do RSX](docs/infamous2/RSX_PROFILE_20261024.md) · [Histórico](docs/infamous2/CHANGELOG.md) · [Ferramentas](tools/infamous2/README.md)
+[Documentação técnica](docs/infamous2/README.md) · [Dados dos testes RSX](docs/infamous2/measurements/RSX_AB_20261024.json) · [Ferramentas](tools/infamous2/README.md)
 
 ## O que já foi feito
 
@@ -31,7 +31,7 @@ Máquina: **Intel Core i5-14400F, Radeon RX 9060 XT, 32 GB DDR4, Windows e Vulka
 
 As linhas pertencem a testes diferentes: **os percentuais não devem ser somados**. Percursos manuais variam com câmera, NPCs, efeitos e combate; os números não garantem o mesmo ganho em outras cenas ou computadores. O 1% low usa a média do 1% de intervalos mais lentos, não o FPS do título da janela.
 
-Consulte os [testes Turbo](docs/infamous2/measurements/TURBO_20261024.md), o [A/B do Offloader](docs/infamous2/measurements/AB_OFFLOADER_20261024.md) e o [perfil RSX](docs/infamous2/RSX_PROFILE_20261024.md) para condições, regressões e limitações.
+Consulte o [guia técnico](docs/infamous2/README.md) e os [dados dos testes RSX](docs/infamous2/measurements/RSX_AB_20261024.json) para condições e limites da comparação.
 
 ## Como usar este repositório
 
@@ -62,7 +62,7 @@ O [patch de modelos](tools/infamous2/patches/BCUS98125_patch.yml) é restrito à
 - Investigar os passes compartilhados pelos efeitos de fumaça e chama recortados.
 - Aprofundar o perfil das esperas RSX/SPU e dos programas associados a NPCs, sem retirar personagens, efeitos ou áudio como atalho.
 
-O [índice técnico](docs/infamous2/README.md) separa resultados atuais dos documentos históricos de pesquisa.
+O [índice técnico](docs/infamous2/README.md) reúne o preset e as condições dos testes publicados.
 
 ## Créditos, contribuição e licença
 

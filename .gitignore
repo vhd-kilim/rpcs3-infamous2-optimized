@@ -129,3 +129,12 @@ CMakeUserPresets.json
 
 # claude
 CLAUDE.md
+
+# Private assistant conversations and laboratory reports (kept locally)
+/.claude/
+/.codex/
+/CONTEXTO_COMPARTILHADO_CODEX_CLAUDE_RPCS3_INFAMOUS2.md
+/RELATORIO_CODIGO_JOGO_PARA_CLAUDE.md
+/docs/infamous2/CHANGELOG.md
+/docs/infamous2/RSX_PROFILE_*.md
+/docs/infamous2/measurements/*.md
