@@ -985,6 +985,7 @@ namespace
 			}
 
 			out.sections++;
+			out.synchronized += section->is_synchronized();
 			out.bytes += section->get_section_size();
 			out.context_mask |= static_cast<u32>(section->get_context());
 		}
@@ -1014,6 +1015,11 @@ bool VKGSRender::on_access_violation(u32 address, bool is_writing)
 
 	if (result.num_flushable > 0)
 	{
+		if (m_infamous2_prefetch)
+		{
+			infamous2_remember_flush(result);
+		}
+
 		const bool flush_diagnostics = rsx::diagnostics::enabled();
 		rsx::diagnostics::flushes::sample flush_sample{};
 		const auto flush_started = flush_diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
@@ -1130,6 +1136,84 @@ void VKGSRender::on_invalidate_memory_range(const utils::address_range32 &range,
 	}
 }
 
+void VKGSRender::infamous2_remember_flush(const vk::texture_cache::thrashed_set& result)
+{
+	std::lock_guard lock(m_infamous2_prefetch_mutex);
+
+	for (const auto* section : result.sections_to_flush)
+	{
+		if (section->get_context() != rsx::texture_upload_context::framebuffer_storage)
+		{
+			continue;
+		}
+
+		const auto& range = section->get_section_range();
+		if (std::find(m_infamous2_prefetch_ranges.begin(), m_infamous2_prefetch_ranges.end(), range) == m_infamous2_prefetch_ranges.end())
+		{
+			m_infamous2_prefetch_ranges[m_infamous2_prefetch_next++ % infamous2_prefetch_slots] = range;
+		}
+	}
+}
+
+void VKGSRender::infamous2_prefetch_scan()
+{
+	m_infamous2_prefetch_scan_needed = false;
+
+	std::array<utils::address_range32, infamous2_prefetch_slots> ranges;
+	{
+		std::lock_guard lock(m_infamous2_prefetch_mutex);
+		ranges = m_infamous2_prefetch_ranges;
+	}
+
+	// Never copy a surface that is (or is about to be) a bound render target: further draws
+	// would not invalidate the copy. Blits and FBO commits reset or discard it as usual.
+	std::array<utils::address_range32, rsx::limits::color_buffers_count * 2 + 2> busy;
+	usz busy_count = 0;
+	for (u8 i = 0; i < rsx::limits::color_buffers_count; ++i)
+	{
+		if (m_surface_info[i].address && m_surface_info[i].pitch)
+		{
+			busy[busy_count++] = m_surface_info[i].get_memory_range();
+		}
+		if (const u32 address = m_framebuffer_layout.color_addresses[i])
+		{
+			busy[busy_count++] = utils::address_range32::start_length(address, 1);
+		}
+	}
+	if (m_depth_surface_info.address && m_depth_surface_info.pitch)
+	{
+		busy[busy_count++] = m_depth_surface_info.get_memory_range();
+	}
+	if (const u32 address = m_framebuffer_layout.zeta_address)
+	{
+		busy[busy_count++] = utils::address_range32::start_length(address, 1);
+	}
+
+	u32 copies = 0;
+	for (const auto& range : ranges)
+	{
+		if (!range.valid() ||
+			std::any_of(busy.begin(), busy.begin() + busy_count, [&](const auto& b) { return b.overlaps(range); }))
+		{
+			continue;
+		}
+
+		if (m_texture_cache.flush_if_cache_miss_likely(*m_current_command_buffer, range))
+		{
+			copies++;
+		}
+	}
+
+	if (copies)
+	{
+		m_infamous2_prefetch_unsubmitted = true;
+		if (rsx::diagnostics::enabled())
+		{
+			rsx::diagnostics::flushes::global().prefetched(copies);
+		}
+	}
+}
+
 void VKGSRender::on_semaphore_acquire_wait()
 {
 	if (m_flush_requests.pending() ||
@@ -1137,6 +1221,26 @@ void VKGSRender::on_semaphore_acquire_wait()
 		(m_queue_status & flush_queue_state::deadlock))
 	{
 		do_local_task(rsx::FIFO::state::lock_wait);
+	}
+
+	if (m_infamous2_prefetch && !(m_queue_status & flush_queue_state::flushing))
+	{
+		if (m_infamous2_prefetch_scan_needed)
+		{
+			infamous2_prefetch_scan();
+		}
+
+		if (m_infamous2_prefetch_unsubmitted)
+		{
+			// The RSX is about to wait on a guest semaphore: start the queued copies now
+			// instead of when a fault finally forces the submit.
+			m_infamous2_prefetch_unsubmitted = false;
+			flush_command_queue();
+			if (rsx::diagnostics::enabled())
+			{
+				rsx::diagnostics::flushes::global().prefetch_submitted();
+			}
+		}
 	}
 }
 
@@ -1371,6 +1475,26 @@ void VKGSRender::on_init_thread()
 	if (m_flush_requests.use_completion_notification)
 	{
 		rsx_log.notice("INFAMOUS2_RSX_FLUSH_WAIT: completion notifications enabled (64-spin hand-off)");
+	}
+
+	// Experimental inFAMOUS 2 path: speculatively read back the framebuffer ranges that
+	// SPU jobs keep fault-flushing, so the GPU copy is done before the guest DMA arrives.
+#ifdef _MSC_VER
+	char prefetch_setting[2]{};
+	std::size_t prefetch_length = 0;
+	const bool prefetch_requested =
+		getenv_s(&prefetch_length, prefetch_setting, sizeof(prefetch_setting), "RPCS3_INFAMOUS2_FB_PREFETCH") == 0 &&
+		prefetch_length == 2 && prefetch_setting[0] == '1';
+#else
+	const char* prefetch_setting = std::getenv("RPCS3_INFAMOUS2_FB_PREFETCH");
+	const bool prefetch_requested = prefetch_setting && prefetch_setting[0] == '1' && prefetch_setting[1] == '\0';
+#endif
+	m_infamous2_prefetch = prefetch_requested &&
+		Emu.GetTitleID() == "BCUS98125" && Emu.GetAppVersion() == "01.04" &&
+		Emu.GetExecutableHash() == "PPU-41a7d047c573c78c0307506c9d1b52d15a66e4f5";
+	if (m_infamous2_prefetch)
+	{
+		rsx_log.notice("INFAMOUS2_FB_PREFETCH: speculative readback of fault-flushed framebuffer ranges enabled");
 	}
 
 	if (m_device == VK_NULL_HANDLE)
@@ -2685,6 +2809,13 @@ void VKGSRender::prepare_rtts(rsx::framebuffer_creation_context context)
 	const auto color_bpp = get_format_block_size_in_bytes(m_framebuffer_layout.color_format);
 	const auto samples = get_format_sample_count(m_framebuffer_layout.aa_mode);
 
+	if (m_infamous2_prefetch)
+	{
+		infamous2_prefetch_scan();
+		// The old targets are unbound below; recheck them at the next semaphore wait.
+		m_infamous2_prefetch_scan_needed = true;
+	}
+
 	for (u8 i = 0; i < rsx::limits::color_buffers_count; ++i)
 	{
 		// Flush old address if we keep missing it
@@ -2901,6 +3032,7 @@ bool VKGSRender::scaled_image_from_memory(const rsx::blit_src_info& src, const r
 	if (m_texture_cache.blit(src, dst, interpolate, m_rtts, *m_current_command_buffer))
 	{
 		m_samplers_dirty.store(true);
+		m_infamous2_prefetch_scan_needed = m_infamous2_prefetch;
 		m_current_command_buffer->set_flag(vk::command_buffer::cb_has_blit_transfer);
 
 		if (m_current_command_buffer->flags & vk::command_buffer::cb_has_dma_transfer)

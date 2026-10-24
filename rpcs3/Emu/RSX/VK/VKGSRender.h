@@ -192,6 +192,16 @@ private:
 	shared_mutex m_flush_queue_mutex;
 	vk::flush_request_task m_flush_requests;
 
+	// Experimental inFAMOUS 2 framebuffer prefetch (RPCS3_INFAMOUS2_FB_PREFETCH=1).
+	// Ranges that guest threads fault-flushed; the RSX copies them speculatively.
+	static constexpr usz infamous2_prefetch_slots = 8;
+	bool m_infamous2_prefetch = false; // Set before the renderer starts; immutable afterwards
+	std::mutex m_infamous2_prefetch_mutex;
+	std::array<utils::address_range32, infamous2_prefetch_slots> m_infamous2_prefetch_ranges{};
+	usz m_infamous2_prefetch_next = 0;
+	bool m_infamous2_prefetch_scan_needed = false; // RSX thread only
+	bool m_infamous2_prefetch_unsubmitted = false; // RSX thread only
+
 	ullong m_last_cond_render_eval_hint = 0;
 
 	// Offloader thread deadlock recovery
@@ -225,6 +235,8 @@ public:
 
 private:
 	void prepare_rtts(rsx::framebuffer_creation_context context);
+	void infamous2_remember_flush(const vk::texture_cache::thrashed_set& result);
+	void infamous2_prefetch_scan();
 
 	void close_and_submit_command_buffer(
 		vk::fence* fence = nullptr,

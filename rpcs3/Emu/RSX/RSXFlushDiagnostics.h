@@ -40,6 +40,7 @@ namespace rsx::diagnostics::flushes
 
 		std::uint64_t events = 0;
 		std::uint64_t sections = 0;
+		std::uint64_t synchronized = 0; // Sections already read back (speculatively) when the fault arrived
 		std::uint64_t bytes = 0;
 		std::uint64_t service_ns = 0; // Queue lock + waiting for the RSX to serve the request
 		std::uint64_t transfer_ns = 0; // flush_all: GPU readback and write to guest memory
@@ -79,6 +80,8 @@ namespace rsx::diagnostics::flushes
 		std::uint64_t rsx_queue_flush_ns = 0; // RSX flush_command_queue before releasing producers
 		std::uint64_t rsx_consumer_wait_ns = 0; // RSX waiting for producers to finish their transfer
 		std::uint64_t rsx_max_consumer_wait_ns = 0;
+		std::uint64_t prefetch_copies = 0; // Speculative readbacks queued by the RSX
+		std::uint64_t prefetch_submits = 0; // Early submits of those copies
 	};
 
 	class registry
@@ -99,7 +102,7 @@ namespace rsx::diagnostics::flushes
 				if (!slot.events)
 				{
 					slot = event;
-					slot.events = slot.sections = slot.bytes = slot.service_ns = slot.transfer_ns = slot.max_ns = 0;
+					slot.events = slot.sections = slot.synchronized = slot.bytes = slot.service_ns = slot.transfer_ns = slot.max_ns = 0;
 				}
 
 				target = &slot;
@@ -108,6 +111,7 @@ namespace rsx::diagnostics::flushes
 
 			target->events++;
 			target->sections += event.sections;
+			target->synchronized += event.synchronized;
 			target->bytes += event.bytes;
 			target->service_ns += event.service_ns;
 			target->transfer_ns += event.transfer_ns;
@@ -128,6 +132,18 @@ namespace rsx::diagnostics::flushes
 			{
 				m_window.rsx_max_consumer_wait_ns = consumer_wait_ns;
 			}
+		}
+
+		void prefetched(std::uint64_t copies) noexcept
+		{
+			std::lock_guard lock(m_mutex);
+			m_window.prefetch_copies += copies;
+		}
+
+		void prefetch_submitted() noexcept
+		{
+			std::lock_guard lock(m_mutex);
+			m_window.prefetch_submits++;
 		}
 
 		snapshot take() noexcept
