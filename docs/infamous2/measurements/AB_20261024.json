@@ -1,0 +1,267 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-24",
+  "timezone": "America/Sao_Paulo",
+  "game": {
+    "title": "inFAMOUS 2",
+    "title_id": "BCUS98125",
+    "version": "01.04",
+    "ppu_hash": "41a7d047c573c78c0307506c9d1b52d15a66e4f5"
+  },
+  "hardware": {
+    "cpu": "Intel Core i5-14400F",
+    "gpu": "AMD Radeon RX 9060 XT",
+    "ram_gb": 32,
+    "os": "Windows x64",
+    "renderer": "Vulkan",
+    "resolution_scale_percent": 200
+  },
+  "method": {
+    "source": "Transcribed summary tables from completed local A/B runs; no raw traces or assistant conversations included",
+    "route_seconds": 90,
+    "initial_discard_seconds": 3,
+    "analyzed_seconds": 87,
+    "rsx_diagnostics": false,
+    "route": "Manually repeated city route",
+    "one_percent_low": "1000 / mean of the slowest 1% of presentation intervals",
+    "limitations": [
+      "Two runs per arm; manual scene and start-time variation",
+      "Separate series have different reference runs; do not sum percentage gains",
+      "Benchmarks do not validate campaign stability or all visual effects",
+      "Source publication changes no emulator logic relative to the reviewed snapshot"
+    ]
+  },
+  "source_snapshot": "309962af7",
+  "public_code_equivalent": true,
+  "builds": {
+    "early_submit_v2": {
+      "original_source": "d73b4b24f",
+      "sha256": "F82ED5187E9039A72C2172A89F6BD1B7F45C0872A1C29962DC63D4BD79AAC3D9"
+    },
+    "lsconst_v1": {
+      "original_source": "6a654678c",
+      "sha256": "BA14530718BA38EBD4B2DC251C00C36C4BA590B3D4F7624397261082AE80D8DB"
+    },
+    "lsconst_v2": {
+      "original_source": "309962af7",
+      "sha256": "ED176FEBAA8B2A849F95F9AA1DAC799833452694E14CFB2F25B08B636E3F2D5A"
+    }
+  },
+  "base": {
+    "preset": "Turbo v3 + single-view lookup + Disable Mesh Trimming (Yahfz)",
+    "xfloat_global": "Approximate",
+    "relaxed_groups": [
+      "postfx",
+      "light",
+      "edgepost",
+      "vis",
+      "spudraw",
+      "mesh",
+      "fx"
+    ],
+    "fifo_fetch_accuracy": "Atomic",
+    "rsx_reservation_accurate": true
+  },
+  "series": [
+    {
+      "id": "early_submit_v2",
+      "build": "early_submit_v2",
+      "difference": {
+        "variable": "RPCS3_INFAMOUS2_EARLY_SUBMIT",
+        "reference": "0",
+        "candidate": "256"
+      },
+      "runs": [
+        {
+          "start_local": "18:41",
+          "arm": "reference",
+          "fps": 37.14,
+          "one_percent_low": 26.03,
+          "p99_ms": 35.24,
+          "intervals_gt50ms": 2
+        },
+        {
+          "start_local": "18:45",
+          "arm": "candidate",
+          "fps": 39.06,
+          "one_percent_low": 25.71,
+          "p99_ms": 34.87,
+          "intervals_gt50ms": 1
+        },
+        {
+          "start_local": "18:49",
+          "arm": "reference",
+          "fps": 37.05,
+          "one_percent_low": 25.89,
+          "p99_ms": 35.76,
+          "intervals_gt50ms": 1
+        },
+        {
+          "start_local": "18:53",
+          "arm": "candidate",
+          "fps": 39.08,
+          "one_percent_low": 26.4,
+          "p99_ms": 33.82,
+          "intervals_gt50ms": 1
+        }
+      ],
+      "reported_means": {
+        "reference": {
+          "fps": 37.1,
+          "one_percent_low": 25.96,
+          "p99_ms": 35.5
+        },
+        "candidate": {
+          "fps": 39.07,
+          "one_percent_low": 26.06,
+          "p99_ms": 34.35
+        }
+      },
+      "observed_fps_gain_percent": 5.3,
+      "decision": "Positive mean-FPS result on this route; little change in 1% low"
+    },
+    {
+      "id": "lsconst_v1_restricted",
+      "build": "lsconst_v1",
+      "early_submit": "256",
+      "difference": {
+        "variable": "RPCS3_INFAMOUS2_LSCONST",
+        "reference": "",
+        "candidate": "light,edgepost,postfx"
+      },
+      "runs": [
+        {
+          "start_local": "20:06",
+          "arm": "candidate",
+          "fps": 41.01,
+          "one_percent_low": 27.41,
+          "p99_ms": 32.63,
+          "intervals_gt50ms": 1
+        },
+        {
+          "start_local": "20:10",
+          "arm": "reference",
+          "fps": 39.08,
+          "one_percent_low": 26.21,
+          "p99_ms": 34.41,
+          "intervals_gt50ms": 1
+        },
+        {
+          "start_local": "20:14",
+          "arm": "candidate",
+          "fps": 40.34,
+          "one_percent_low": 26.8,
+          "p99_ms": 33.55,
+          "intervals_gt50ms": 0
+        },
+        {
+          "start_local": "20:18",
+          "arm": "reference",
+          "fps": 39.61,
+          "one_percent_low": 27.44,
+          "p99_ms": 32.79,
+          "intervals_gt50ms": 1
+        }
+      ],
+      "reported_means": {
+        "reference": {
+          "fps": 39.35,
+          "one_percent_low": 26.83,
+          "p99_ms": 33.6
+        },
+        "candidate": {
+          "fps": 40.68,
+          "one_percent_low": 27.11,
+          "p99_ms": 33.09
+        }
+      },
+      "observed_fps_gain_percent": 3.4,
+      "decision": "Promising restricted experiment, not a campaign-wide safety claim"
+    },
+    {
+      "id": "lsconst_v2_extension",
+      "build": "lsconst_v2",
+      "early_submit": "256",
+      "difference": {
+        "variable": "RPCS3_INFAMOUS2_LSCONST",
+        "reference": "light,edgepost,postfx",
+        "candidate": "light,edgepost,postfx,mesh,vis"
+      },
+      "runs": [
+        {
+          "start_local": "20:46",
+          "arm": "candidate",
+          "fps": 40.76,
+          "one_percent_low": 26.5,
+          "p99_ms": 33.55
+        },
+        {
+          "start_local": "20:52",
+          "arm": "reference",
+          "fps": 40.61,
+          "one_percent_low": 26.92,
+          "p99_ms": 32.79
+        },
+        {
+          "start_local": "20:57",
+          "arm": "candidate",
+          "fps": 39.51,
+          "one_percent_low": 26.66,
+          "p99_ms": 33.38
+        },
+        {
+          "start_local": "21:01",
+          "arm": "reference",
+          "fps": 40.74,
+          "one_percent_low": 27.21,
+          "p99_ms": 33.64
+        }
+      ],
+      "reported_means": {
+        "reference": {
+          "fps": 40.68,
+          "one_percent_low": 27.07,
+          "p99_ms": 33.22
+        },
+        "candidate": {
+          "fps": 40.14,
+          "one_percent_low": 26.58,
+          "p99_ms": 33.47
+        }
+      },
+      "observed_fps_gain_percent": -1.3,
+      "decision": "No demonstrated benefit; retain restricted groups"
+    }
+  ],
+  "failed_experiments": [
+    {
+      "groups": "light,edgepost,postfx,mesh,spudraw,vis,fx",
+      "build": "lsconst_v1",
+      "result": "Crash at startup (Unknown STOP code 0x0), 15 table-mismatch messages"
+    },
+    {
+      "groups": "light,edgepost,postfx,mesh,spudraw,vis,fx",
+      "build": "lsconst_v2",
+      "result": "24 table-mismatch messages in spudraw and particle programs; test stopped"
+    },
+    {
+      "option": "FIFO Fetch Accuracy Fast",
+      "reference_fps": 38.91,
+      "candidate_fps": 39.05,
+      "decision": "0.4% within run variation; keep Atomic"
+    }
+  ],
+  "correctness_limits": [
+    "LSCONST mismatch logging does not fall back to generic execution",
+    "Entry checks do not prove tables remain unchanged during a function",
+    "Job-load diagnostics based on changed 64-byte headers can miss identical reloads"
+  ],
+  "validation": {
+    "lsconst_v2_build": {
+      "errors": 0,
+      "warnings": 3
+    },
+    "full_googletest_run": false,
+    "full_campaign_validated": false
+  }
+}
