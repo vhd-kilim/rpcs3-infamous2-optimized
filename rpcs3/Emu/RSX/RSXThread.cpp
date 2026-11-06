@@ -365,6 +365,16 @@ namespace rsx
 		{
 			append_label(labels.overflow);
 		}
+
+		// Which event most recently preceded each module start: [module, after, starts, mean_delta_us].
+		label_text += "],\"starts\":[";
+		bool first_start = true;
+		for (const auto& s : diagnostics::labels::take_causes())
+		{
+			if (!s.starts) break;
+			fmt::append(label_text, "%s[\"%s\",\"%s\",%llu,%llu]", first_start ? "" : ",", s.module, s.after, s.starts, s.delta_ns / 1000 / s.starts);
+			first_start = false;
+		}
 		label_text += "]}";
 		perf_log.notice("%s", label_text);
 	}
@@ -3839,6 +3849,7 @@ namespace rsx
 		if (diagnostics::enabled() && is_current_thread())
 		{
 			diagnostics::flip();
+			diagnostics::labels::mark_event(diagnostics::labels::rsx_flip_event);
 			diagnostics::tick(log_rsx_diagnostics);
 		}
 	}

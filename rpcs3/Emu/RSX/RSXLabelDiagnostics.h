@@ -18,6 +18,13 @@ namespace rsx::diagnostics::labels
 	// inFAMOUS 2 semaphores measured in RSX_DIAG as the main RSX waits.
 	inline constexpr std::array<std::uint32_t, 2> watched{0x40300870, 0x40300890};
 
+	// Events a module start may follow: other modules' releases plus RSX-side markers.
+	inline constexpr const char* rsx_flip_event = "rsx_flip";
+	inline constexpr const char* rsx_wait_870_end_event = "rsx_wait_870_end";
+	inline constexpr const char* rsx_wait_890_end_event = "rsx_wait_890_end";
+
+	inline void mark_event(const char* name) noexcept;
+
 	enum class path : std::uint8_t
 	{
 		dma,
@@ -178,6 +185,7 @@ namespace rsx::diagnostics::labels
 			{
 				const auto now = now_ns();
 				global().rsx_wait_finished(i, now > begin ? now - begin : 0);
+				mark_event(i == 0 ? rsx_wait_870_end_event : rsx_wait_890_end_event);
 			}
 		}
 	}
@@ -218,12 +226,91 @@ namespace rsx::diagnostics::labels
 		static std::array<activity, 48> table{};
 		for (auto& a : table)
 		{
+			// Names are compared by content: the same name can come from different string literals.
+			const auto same = [&](const char* m) { return m == module || (m && std::strcmp(m, module) == 0); };
 			const char* m = a.module.load();
-			if (m == module) return &a;
+			if (same(m)) return &a;
 			if (!m && a.module.compare_exchange_strong(m, module)) return &a;
-			if (m == module) return &a; // Raced with another thread inserting the same module
+			if (same(m)) return &a; // Raced with another thread inserting the same module
 		}
 		return nullptr;
+	}
+
+	inline void mark_event(const char* name) noexcept
+	{
+		if (auto* a = find_activity(name))
+		{
+			a->last_release_ns.store(now_ns());
+		}
+	}
+
+	// Which event most recently preceded each start of a module (module x predecessor).
+	struct start_cause
+	{
+		const char* module = nullptr;
+		const char* after = nullptr;
+		std::uint64_t starts = 0;
+		std::uint64_t delta_ns = 0; // Sum of (start - predecessor event)
+	};
+
+	struct start_causes
+	{
+		std::mutex mutex;
+		std::array<start_cause, 32> slots{};
+	};
+
+	inline start_causes& causes() noexcept
+	{
+		static start_causes value;
+		return value;
+	}
+
+	inline void record_start(const char* module, std::uint64_t now) noexcept
+	{
+		// Find the latest event (release/marker) before now among all tracked entries.
+		const char* after = nullptr;
+		std::uint64_t latest = 0;
+		for (const char* name : {rsx_flip_event, rsx_wait_870_end_event, rsx_wait_890_end_event})
+		{
+			if (auto* a = find_activity(name); a)
+			{
+				const auto t = a->last_release_ns.load();
+				if (t && t <= now && t > latest) { latest = t; after = name; }
+			}
+		}
+
+		for (const char* m : {"spulight", "edgepost", "postfx1", "postfx2", "postfx3", "postfx4", "postfx5"})
+		{
+			if (std::strcmp(m, module) == 0) continue;
+			if (auto* a = find_activity(m); a)
+			{
+				const auto t = a->last_release_ns.load();
+				if (t && t <= now && t > latest) { latest = t; after = m; }
+			}
+		}
+
+		if (!after) return;
+
+		auto& c = causes();
+		std::lock_guard lock(c.mutex);
+		for (auto& s : c.slots)
+		{
+			if (s.starts && (s.module != module || s.after != after)) continue;
+			s.module = module;
+			s.after = after;
+			s.starts++;
+			s.delta_ns += now - latest;
+			return;
+		}
+	}
+
+	inline std::array<start_cause, 32> take_causes() noexcept
+	{
+		auto& c = causes();
+		std::lock_guard lock(c.mutex);
+		const auto result = c.slots;
+		c.slots = {};
+		return result;
 	}
 
 	// SPU thread: a DMA issued by code of module (module names are static strings).
@@ -235,7 +322,10 @@ namespace rsx::diagnostics::labels
 			const auto now = now_ns();
 			if (now - a->last_release_ns.load() < 100'000) return;
 			std::uint64_t expected = 0;
-			a->first_ns.compare_exchange_strong(expected, now);
+			if (a->first_ns.compare_exchange_strong(expected, now))
+			{
+				record_start(module, now);
+			}
 		}
 	}
 
