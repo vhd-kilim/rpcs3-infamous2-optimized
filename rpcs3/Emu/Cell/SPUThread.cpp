@@ -2214,7 +2214,7 @@ namespace
 
 				if (const char* code = infamous2_code_module(spu))
 				{
-					rsx::diagnostics::labels::code_dma(code);
+					rsx::diagnostics::labels::code_dma(code, spu->id);
 				}
 			}
 		}
@@ -2242,7 +2242,7 @@ namespace
 
 		if (const char* code = infamous2_code_module(spu))
 		{
-			labels::code_dma(code);
+			labels::code_dma(code, spu->id);
 		}
 
 		if (is_get)

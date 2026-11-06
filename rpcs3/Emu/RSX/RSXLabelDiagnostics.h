@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -73,6 +74,7 @@ namespace rsx::diagnostics::labels
 		std::uint64_t max_active_ns = 0;
 		std::uint64_t idle_ns = 0;
 		std::uint64_t rsx_before_start = 0; // RSX was already waiting before the module started
+		std::uint64_t workers = 0; // Sum over releases of distinct SPU threads whose code DMA'd during the run
 
 		bool same_site(const sample& o) const noexcept
 		{
@@ -93,7 +95,7 @@ namespace rsx::diagnostics::labels
 	{
 	public:
 		void record(const sample& event, std::uint64_t wait_ns, bool waiting, std::uint64_t job_ns,
-			std::uint64_t active_ns = 0, std::uint64_t idle_ns = 0, bool rsx_before_start = false) noexcept
+			std::uint64_t active_ns = 0, std::uint64_t idle_ns = 0, bool rsx_before_start = false, std::uint64_t workers = 0) noexcept
 		{
 			std::lock_guard lock(m_mutex);
 			sample* target = &m_window.overflow;
@@ -121,6 +123,7 @@ namespace rsx::diagnostics::labels
 			target->max_active_ns = std::max(target->max_active_ns, active_ns);
 			target->idle_ns += idle_ns;
 			target->rsx_before_start += rsx_before_start;
+			target->workers += workers;
 		}
 
 		void rsx_wait_finished(std::size_t index, std::uint64_t ns) noexcept
@@ -219,6 +222,7 @@ namespace rsx::diagnostics::labels
 		std::atomic<const char*> module{nullptr};
 		std::atomic<std::uint64_t> first_ns{0};
 		std::atomic<std::uint64_t> last_release_ns{0};
+		std::atomic<std::uint64_t> threads{0}; // SPU threads (id & 63) whose code DMA'd during the current run
 	};
 
 	inline activity* find_activity(const char* module) noexcept
@@ -314,9 +318,15 @@ namespace rsx::diagnostics::labels
 	}
 
 	// SPU thread: a DMA issued by code of module (module names are static strings).
-	inline void code_dma(const char* module) noexcept
+	inline void code_dma(const char* module, std::uint32_t thread_slot) noexcept
 	{
-		if (auto* a = find_activity(module); a && !a->first_ns.load())
+		auto* a = find_activity(module);
+		if (!a)
+		{
+			return;
+		}
+
+		if (!a->first_ns.load())
 		{
 			// Tail DMAs right after the release still belong to the finished run.
 			const auto now = now_ns();
@@ -327,6 +337,8 @@ namespace rsx::diagnostics::labels
 				record_start(module, now);
 			}
 		}
+
+		a->threads.fetch_or(1ull << (thread_slot & 63));
 	}
 
 	// SPU thread: a guest write to [eal, eal + size).
@@ -349,10 +361,11 @@ namespace rsx::diagnostics::labels
 			const auto begin = global().wait_begin[i].load();
 			const auto loaded = current_job().loaded_ns;
 
-			std::uint64_t active = 0, idle = 0;
+			std::uint64_t active = 0, idle = 0, workers = 0;
 			bool rsx_first = false;
 			if (auto* a = code ? find_activity(code) : nullptr)
 			{
+				workers = std::popcount(a->threads.exchange(0));
 				const auto first = a->first_ns.exchange(0);
 				const auto previous = a->last_release_ns.exchange(now);
 				if (first && now > first)
@@ -363,7 +376,7 @@ namespace rsx::diagnostics::labels
 				}
 			}
 
-			global().record(event, begin && now > begin ? now - begin : 0, begin != 0, loaded && now > loaded ? now - loaded : 0, active, idle, rsx_first);
+			global().record(event, begin && now > begin ? now - begin : 0, begin != 0, loaded && now > loaded ? now - loaded : 0, active, idle, rsx_first, workers);
 		}
 	}
 
