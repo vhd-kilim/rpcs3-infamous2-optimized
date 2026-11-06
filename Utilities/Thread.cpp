@@ -3654,9 +3654,12 @@ namespace
 	{
 		u64 rsx = 0;
 		u64 others = 0;
+		u64 p_cores = 0; // Mode 2: remaining P-cores for SPU/PPU threads
+		u64 e_cores = 0; // Mode 2: E-cores for the SPU reservation checking thread
 	};
 
 	// Reserve the highest P-core (both SMT siblings) for the RSX thread. Zero masks mean "not applicable".
+	// RPCS3_HYBRID_AFFINITY=2 also keeps SPU/PPU threads on the other P-cores (see efficiency_core_mask).
 	hybrid_affinity_masks compute_hybrid_affinity_masks(u64 process_mask)
 	{
 		hybrid_affinity_masks result{};
@@ -3664,13 +3667,14 @@ namespace
 #ifdef _MSC_VER
 		char setting[2]{};
 		std::size_t length = 0;
-		if (getenv_s(&length, setting, sizeof(setting), "RPCS3_HYBRID_AFFINITY") != 0 || length != 2 || setting[0] != '1')
+		if (getenv_s(&length, setting, sizeof(setting), "RPCS3_HYBRID_AFFINITY") != 0 || length != 2 || (setting[0] != '1' && setting[0] != '2'))
 			return result;
 #else
 		const char* setting = std::getenv("RPCS3_HYBRID_AFFINITY");
-		if (!setting || setting[0] != '1' || setting[1] != '\0')
+		if (!setting || (setting[0] != '1' && setting[0] != '2') || setting[1] != '\0')
 			return result;
 #endif
+		const bool split_classes = setting[0] == '2';
 		DWORD size = 0;
 		GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &size);
 		if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || !size)
@@ -3683,12 +3687,14 @@ namespace
 		u8 best_class = 0;
 		u64 rsx_mask = 0;
 		bool hybrid = false;
+		std::vector<std::pair<u8, u64>> cores;
 
 		for (usz offset = 0; offset < size;)
 		{
 			const auto info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data() + offset);
 			const u8 eff = info->Processor.EfficiencyClass;
 			const u64 mask = info->Processor.GroupMask[0].Mask & process_mask;
+			cores.emplace_back(eff, mask);
 
 			if (eff != best_class && offset) hybrid = true;
 
@@ -3708,6 +3714,25 @@ namespace
 		result.rsx = rsx_mask;
 		result.others = process_mask & ~rsx_mask;
 		sig_log.notice("Hybrid affinity: RSX mask=0x%x, other threads mask=0x%x", result.rsx, result.others);
+
+		if (split_classes)
+		{
+			for (const auto& [eff, mask] : cores)
+			{
+				(eff == best_class ? result.p_cores : result.e_cores) |= mask;
+			}
+
+			result.p_cores &= ~rsx_mask;
+
+			if (!result.p_cores || !result.e_cores)
+			{
+				result.p_cores = result.e_cores = 0;
+			}
+			else
+			{
+				sig_log.notice("Hybrid affinity v2: SPU/PPU mask=0x%x, SPU reservation checker mask=0x%x", result.p_cores, result.e_cores);
+			}
+		}
 #else
 		(void)process_mask;
 #endif
@@ -3726,13 +3751,28 @@ bool thread_ctrl::hybrid_affinity_enabled()
 	return hybrid_masks().rsx != 0;
 }
 
+u64 thread_ctrl::efficiency_core_mask()
+{
+	return hybrid_masks().e_cores;
+}
+
 u64 thread_ctrl::get_affinity_mask(thread_class group)
 {
 	detect_cpu_layout();
 
 	if (const auto& hybrid = hybrid_masks(); hybrid.rsx)
 	{
-		return group == thread_class::rsx ? hybrid.rsx : hybrid.others;
+		if (group == thread_class::rsx)
+		{
+			return hybrid.rsx;
+		}
+
+		if (hybrid.p_cores && (group == thread_class::spu || group == thread_class::ppu))
+		{
+			return hybrid.p_cores;
+		}
+
+		return hybrid.others;
 	}
 
 	if (const auto thread_count = utils::get_thread_count())

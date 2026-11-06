@@ -5922,6 +5922,18 @@ s64 spu_thread::get_ch_value(u32 ch)
 		static atomic_t<u8> s_is_reservation_data_checking_thread = false;
 		bool is_reservation_data_checking_thread = false;
 
+		// RPCS3_HYBRID_AFFINITY=2: the checker busy-polls, so it runs on the E-cores while it holds the role.
+		const u64 checker_mask = g_cfg.core.thread_scheduler != thread_scheduler_mode::os ? thread_ctrl::efficiency_core_mask() : 0;
+		const auto release_checker = [&]()
+		{
+			s_is_reservation_data_checking_thread = 0;
+
+			if (checker_mask)
+			{
+				thread_ctrl::set_thread_affinity_mask(thread_ctrl::get_affinity_mask(thread_class::spu));
+			}
+		};
+
 		const bool is_LR_wait = raddr && mask1 & SPU_EVENT_LR;
 
 		auto& history = eventstat_wait_time[(raddr % SPU_LS_SIZE) / 128];
@@ -5954,6 +5966,11 @@ s64 spu_thread::get_ch_value(u32 ch)
 					eventstat_busy_waiting_switch = 1;
 					is_reservation_data_checking_thread = true;
 					eventstat_raddr = 1;
+
+					if (checker_mask)
+					{
+						thread_ctrl::set_thread_affinity_mask(checker_mask);
+					}
 					eventstat_spin_count = 0;
 				}
 			}
@@ -5988,7 +6005,7 @@ s64 spu_thread::get_ch_value(u32 ch)
 			{
 				if (is_reservation_data_checking_thread)
 				{
-					s_is_reservation_data_checking_thread = 0;
+					release_checker();
 
 					// Check again other reservations in other threads
 					lv2_obj::notify_all();
@@ -6275,7 +6292,7 @@ s64 spu_thread::get_ch_value(u32 ch)
 
 		if (is_reservation_data_checking_thread)
 		{
-			s_is_reservation_data_checking_thread = 0;
+			release_checker();
 
 			// Check again other reservations in other threads
 			lv2_obj::notify_all();

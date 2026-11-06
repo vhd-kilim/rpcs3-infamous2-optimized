@@ -334,6 +334,10 @@ public:
 	// the RSX thread gets one whole P-core (both SMT siblings), everything else the remaining cores.
 	static bool hybrid_affinity_enabled();
 
+	// RPCS3_HYBRID_AFFINITY=2: SPU/PPU threads stay on the remaining P-cores, and this E-core mask
+	// is for the busy-polling SPU reservation checking thread (0 when not in that mode).
+	static u64 efficiency_core_mask();
+
 	// Sets the native thread priority
 	static void set_native_priority(int priority);
 
