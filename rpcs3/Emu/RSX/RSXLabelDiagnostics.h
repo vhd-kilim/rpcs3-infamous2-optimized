@@ -60,6 +60,13 @@ namespace rsx::diagnostics::labels
 		std::uint64_t job_ns = 0; // Sum of (write - job module load)
 		std::uint64_t max_job_ns = 0;
 
+		// Activity of the writing module (see code_dma): first DMA issued by its code since its previous
+		// release -> this release, and the idle gap before that first DMA.
+		std::uint64_t active_ns = 0;
+		std::uint64_t max_active_ns = 0;
+		std::uint64_t idle_ns = 0;
+		std::uint64_t rsx_before_start = 0; // RSX was already waiting before the module started
+
 		bool same_site(const sample& o) const noexcept
 		{
 			return address == o.address && kind == o.kind && job == o.job && code == o.code && pc == o.pc;
@@ -78,7 +85,8 @@ namespace rsx::diagnostics::labels
 	class registry
 	{
 	public:
-		void record(const sample& event, std::uint64_t wait_ns, bool waiting, std::uint64_t job_ns) noexcept
+		void record(const sample& event, std::uint64_t wait_ns, bool waiting, std::uint64_t job_ns,
+			std::uint64_t active_ns = 0, std::uint64_t idle_ns = 0, bool rsx_before_start = false) noexcept
 		{
 			std::lock_guard lock(m_mutex);
 			sample* target = &m_window.overflow;
@@ -102,6 +110,10 @@ namespace rsx::diagnostics::labels
 				target->job_ns += job_ns;
 				target->max_job_ns = std::max(target->max_job_ns, job_ns);
 			}
+			target->active_ns += active_ns;
+			target->max_active_ns = std::max(target->max_active_ns, active_ns);
+			target->idle_ns += idle_ns;
+			target->rsx_before_start += rsx_before_start;
 		}
 
 		void rsx_wait_finished(std::size_t index, std::uint64_t ns) noexcept
@@ -192,6 +204,41 @@ namespace rsx::diagnostics::labels
 		bool m_active;
 	};
 
+	// Job code stays cached in LS between runs, so a module's start is taken from the first DMA its code
+	// issues after its previous semaphore release (any SPU thread).
+	struct activity
+	{
+		std::atomic<const char*> module{nullptr};
+		std::atomic<std::uint64_t> first_ns{0};
+		std::atomic<std::uint64_t> last_release_ns{0};
+	};
+
+	inline activity* find_activity(const char* module) noexcept
+	{
+		static std::array<activity, 48> table{};
+		for (auto& a : table)
+		{
+			const char* m = a.module.load();
+			if (m == module) return &a;
+			if (!m && a.module.compare_exchange_strong(m, module)) return &a;
+			if (m == module) return &a; // Raced with another thread inserting the same module
+		}
+		return nullptr;
+	}
+
+	// SPU thread: a DMA issued by code of module (module names are static strings).
+	inline void code_dma(const char* module) noexcept
+	{
+		if (auto* a = find_activity(module); a && !a->first_ns.load())
+		{
+			// Tail DMAs right after the release still belong to the finished run.
+			const auto now = now_ns();
+			if (now - a->last_release_ns.load() < 100'000) return;
+			std::uint64_t expected = 0;
+			a->first_ns.compare_exchange_strong(expected, now);
+		}
+	}
+
 	// SPU thread: a guest write to [eal, eal + size).
 	// Called only when diagnostics are enabled. Returns quickly for unrelated ranges.
 	inline void spu_write(std::uint32_t eal, std::uint32_t size, path kind, std::uint32_t pc, const char* code) noexcept
@@ -211,7 +258,22 @@ namespace rsx::diagnostics::labels
 			const auto now = now_ns();
 			const auto begin = global().wait_begin[i].load();
 			const auto loaded = current_job().loaded_ns;
-			global().record(event, begin && now > begin ? now - begin : 0, begin != 0, loaded && now > loaded ? now - loaded : 0);
+
+			std::uint64_t active = 0, idle = 0;
+			bool rsx_first = false;
+			if (auto* a = code ? find_activity(code) : nullptr)
+			{
+				const auto first = a->first_ns.exchange(0);
+				const auto previous = a->last_release_ns.exchange(now);
+				if (first && now > first)
+				{
+					active = now - first;
+					idle = previous && first > previous ? first - previous : 0;
+					rsx_first = begin && begin < first;
+				}
+			}
+
+			global().record(event, begin && now > begin ? now - begin : 0, begin != 0, loaded && now > loaded ? now - loaded : 0, active, idle, rsx_first);
 		}
 	}
 

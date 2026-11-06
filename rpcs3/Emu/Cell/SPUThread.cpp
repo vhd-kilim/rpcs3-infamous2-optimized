@@ -2151,15 +2151,72 @@ namespace
 		labels::global().job_loaded();
 	}
 
+	// The job module whose code is at the SPU PC (cached per thread by 64-byte block, rechecked by content).
+	const char* infamous2_code_module(const spu_thread* spu)
+	{
+		thread_local int s_identity = -1;
+		if (s_identity < 0)
+		{
+			s_identity = infamous2::spu_precision::identity_matches() ? 1 : 0;
+		}
+
+		if (!s_identity)
+		{
+			return nullptr;
+		}
+
+		thread_local u32 s_block = umax;
+		thread_local const infamous2::spu_precision::module_range* s_module = nullptr;
+
+		const u32 block = spu->pc & ~63u;
+		const u32 offset = block - infamous2::spu_precision::module_ls_base;
+		if (block < infamous2::spu_precision::module_ls_base || block + 64 > SPU_LS_SIZE)
+		{
+			return nullptr;
+		}
+
+		const auto matches = [&](const infamous2::spu_precision::module_range& m)
+		{
+			return offset + 64 <= m.size && vm::check_addr(m.va + offset, vm::page_readable, 64) &&
+				std::memcmp(spu->ls + block, vm::base(m.va + offset), 64) == 0;
+		};
+
+		if (block == s_block && (!s_module || matches(*s_module)))
+		{
+			return s_module ? s_module->name : nullptr;
+		}
+
+		s_block = block;
+		s_module = nullptr;
+		for (const auto& m : infamous2::spu_precision::modules)
+		{
+			if (matches(m))
+			{
+				s_module = &m;
+				break;
+			}
+		}
+
+		return s_module ? s_module->name : nullptr;
+	}
+
 	// SPURS loads job code with DMA lists, whose fast path copies straight into LS without
 	// do_dma_transfer: compare LS 0x4000 before and after the list instead.
 	class infamous2_list_job_watch
 	{
 	public:
-		explicit infamous2_list_job_watch(const u8* ls) noexcept
+		explicit infamous2_list_job_watch(const spu_thread* spu, const u8* ls) noexcept
 			: m_ls(rsx::diagnostics::enabled() ? ls : nullptr)
 		{
-			if (m_ls) std::memcpy(m_before, m_ls + infamous2::spu_precision::module_ls_base, sizeof(m_before));
+			if (m_ls)
+			{
+				std::memcpy(m_before, m_ls + infamous2::spu_precision::module_ls_base, sizeof(m_before));
+
+				if (const char* code = infamous2_code_module(spu))
+				{
+					rsx::diagnostics::labels::code_dma(code);
+				}
+			}
 		}
 
 		~infamous2_list_job_watch()
@@ -2182,6 +2239,11 @@ namespace
 	{
 		namespace labels = rsx::diagnostics::labels;
 		using infamous2::spu_precision::module_ls_base;
+
+		if (const char* code = infamous2_code_module(spu))
+		{
+			labels::code_dma(code);
+		}
 
 		if (is_get)
 		{
@@ -3045,7 +3107,7 @@ bool spu_thread::do_list_transfer(spu_mfc_cmd& args)
 	}
 
 	perf_meter<"MFC_LIST"_u64> perf0;
-	infamous2_list_job_watch job_watch(ls);
+	infamous2_list_job_watch job_watch(this, ls);
 
 	// Amount of elements to fetch in one go
 	constexpr u32 fetch_size = 6;

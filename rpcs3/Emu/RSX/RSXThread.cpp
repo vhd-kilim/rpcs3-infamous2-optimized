@@ -343,15 +343,16 @@ namespace rsx
 		{
 			fmt::append(label_text, "%s[%u,%llu,%llu]", i ? "," : "", diagnostics::labels::watched[i], labels.rsx_waits[i], labels.rsx_wait_ns[i] / 1000);
 		}
-		label_text += "],\"site_order\":[\"address\",\"path\",\"job\",\"code\",\"pc\",\"writes\",\"while_waiting\",\"wait_us\",\"max_wait_us\",\"job_us\",\"max_job_us\"],\"sites\":[";
+		label_text += "],\"site_order\":[\"address\",\"path\",\"job\",\"code\",\"pc\",\"writes\",\"while_waiting\",\"wait_us\",\"max_wait_us\",\"job_us\",\"max_job_us\",\"active_us\",\"max_active_us\",\"idle_us\",\"rsx_before_start\"],\"sites\":[";
 		bool first_label = true;
 		const auto append_label = [&](const diagnostics::labels::sample& l)
 		{
 			if (!first_label) label_text += ',';
 			first_label = false;
-			fmt::append(label_text, "[%u,%u,\"%s\",\"%s\",%u,%llu,%llu,%llu,%llu,%llu,%llu]",
+			fmt::append(label_text, "[%u,%u,\"%s\",\"%s\",%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu]",
 				l.address, static_cast<u32>(l.kind), l.job ? l.job : "", l.code ? l.code : "", l.pc,
-				l.writes, l.while_waiting, l.wait_ns / 1000, l.max_wait_ns / 1000, l.job_ns / 1000, l.max_job_ns / 1000);
+				l.writes, l.while_waiting, l.wait_ns / 1000, l.max_wait_ns / 1000, l.job_ns / 1000, l.max_job_ns / 1000,
+				l.active_ns / 1000, l.max_active_ns / 1000, l.idle_ns / 1000, l.rsx_before_start);
 		};
 		for (const auto& l : labels.slots)
 		{
