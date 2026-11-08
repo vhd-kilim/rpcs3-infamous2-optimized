@@ -138,3 +138,8 @@ CLAUDE.md
 /docs/infamous2/CHANGELOG.md
 /docs/infamous2/RSX_PROFILE_*.md
 /docs/infamous2/measurements/*.md
+
+# AI-to-AI communication notes stay local
+CONTEXTO_*.md
+PLANO_*.md
+HANDOFF*.md
