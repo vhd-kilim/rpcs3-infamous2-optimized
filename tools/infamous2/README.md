@@ -2,7 +2,7 @@
 
 Fontes dos coletores e analisadores usados neste projeto. Os scripts PowerShell sao snapshots do laboratorio Windows e possuem caminhos locais, hashes de builds e dependencias declaradas no inicio. Ajuste-os para seu ambiente antes de executar; eles nao sao um instalador universal.
 
-`Jogar-Infamous2-Otimizado.ps1` e o lancador local da ultima build testada: Turbo v3 + busca direta de views, com espera por notificacao desligada e backup verificado antes de abrir. O lancador anterior da v3 foi preservado no laboratorio para comparacoes.
+`Jogar-Infamous2-Otimizado.ps1` e um snapshot anterior, fixado na Turbo v3 + busca direta de views (SHA256 532E806D...). Ele faz backup verificado antes de abrir, mas nao ativa os experimentos EARLY_SUBMIT/LSCONST descritos na documentacao atual. Nao aponta automaticamente a ultima build. O lancador anterior da v3 foi preservado no laboratorio para comparacoes.
 
 ## Fluxo
 
@@ -15,10 +15,13 @@ Fontes dos coletores e analisadores usados neste projeto. Os scripts PowerShell 
 
 O exportador nativo usa o layout dos eventos documentado no codigo de Microsoft PerfView (`KernelTraceEventParser.cs`, classes SampledProfileTraceData/ImageLoadTraceData). Ele filtra DPC/ISR e informa perdas e enderecos nao resolvidos. Nao implementa arvore completa de stacks, codigo dinamico do JIT ou simbolos privados do driver.
 
+`Extract-RsxStacks.cpp` complementa esse leitor: faz duas passagens pelo ETL para relacionar timestamps FILETIME/QPC e exporta funcoes inclusivas, primeiros callers do executavel e arestas de chamada. Exige PDB exata, PID/TID e janela da mesma sessao. A leitura e offline; nao abre o jogo. Percentuais inclusivos podem se sobrepor e nao devem ser somados como tempos exclusivos.
+
 Para compilar o leitor, em Developer Command Prompt x64:
 
 ```bat
 cl /O2 /EHsc /std:c++20 /DUNICODE /D_UNICODE tools\infamous2\Extract-RsxCpu.cpp advapi32.lib dbghelp.lib
+cl /O2 /EHsc /std:c++20 /DUNICODE /D_UNICODE tools\infamous2\Extract-RsxStacks.cpp advapi32.lib dbghelp.lib
 ```
 
 ## Teste do helper de notificacao
